@@ -182,7 +182,8 @@ export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) =>
     };
   }
 
-  const channel = supabase
+  const client = supabase;
+  const channel = client
     .channel('open_play_state_changes')
     .on(
       'postgres_changes',
@@ -194,6 +195,6 @@ export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) =>
     .subscribe();
 
   return () => {
-    void supabase.removeChannel(channel);
+    void client.removeChannel(channel);
   };
 };
