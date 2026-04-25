@@ -232,10 +232,11 @@ select {
 .queue-card-header,
 .player-chip,
 .court-header,
-.team-row,
+.match-player-card,
 .court-actions,
 .roster-card,
-.roster-actions {
+.roster-actions,
+.storage-status {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -365,15 +366,73 @@ select {
   color: #b45309;
 }
 
-.team-row {
-  padding: 0.6rem;
+.bulk-input {
+  min-height: 7rem;
+  width: 100%;
+  padding: 0.75rem;
+  color: #172033;
+  background: #f8fbfd;
+  border: 1px solid #cddce8;
+  border-radius: 0.75rem;
+  resize: vertical;
+}
+
+.lock-note {
+  margin-top: 0.5rem;
+}
+
+.storage-status {
+  justify-content: flex-start;
+  margin-top: 1rem;
+  color: #4f6578;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.match-player-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.match-player-card,
+.saved-player-card {
+  padding: 0.7rem;
+  text-align: left;
   background: #ffffff;
+  border: 1px solid #d9e6ef;
   border-radius: 0.8rem;
 }
 
-.team-row span {
-  flex: 1;
-  color: #4b6175;
+.match-player-card {
+  min-height: 4.5rem;
+}
+
+.match-player-card.winner {
+  color: #065f46;
+  background: #dcfce7;
+  border-color: #34d399;
+}
+
+.match-player-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.saved-player-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.saved-player-card {
+  display: grid;
+  gap: 0.2rem;
+  width: 100%;
+}
+
+.saved-player-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .drop-zone,
