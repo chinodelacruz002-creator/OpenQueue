@@ -43,8 +43,8 @@ const todayKey = () => new Date().toISOString().slice(0, 10);
 
 const createDefaultForm = (): PlayerForm => ({
   name: '',
-  level: 2,
-  ...getLevelRange(2),
+  level: 3,
+  ...getLevelRange(3),
   paddle: '',
   gripColor: '',
   preferredPartnerName: '',
@@ -56,7 +56,7 @@ const createInitialCourts = (): Court[] =>
     id: `court-${index + 1}`,
     name: `Court ${index + 1}`,
     minLevel: Math.max(1, index + 1),
-    maxLevel: Math.min(5, index + 2),
+    maxLevel: Math.min(4, index + 2),
     status: 'ready',
     match: null,
   }));
@@ -321,7 +321,7 @@ export default function App() {
             id: `court-${index + 1}`,
             name: `Court ${index + 1}`,
             minLevel: 1,
-            maxLevel: 5,
+            maxLevel: 4,
             status: 'ready',
             match: null,
           }

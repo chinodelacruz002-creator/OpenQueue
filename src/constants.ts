@@ -1,4 +1,4 @@
-export const LEVELS = [1, 2, 3, 4, 5];
+export const LEVELS = [1, 2, 3, 4];
 
 export const PADDLE_OPTIONS = [
   'Juciao',
@@ -37,9 +37,9 @@ export const getLevelRange = (level: number) => {
     return { minLevel: 1, maxLevel: 3 };
   }
 
-  if (level === 3 || level === 4) {
-    return { minLevel: 3, maxLevel: 4 };
+  if (level === 3) {
+    return { minLevel: 2, maxLevel: 3 };
   }
 
-  return { minLevel: 3, maxLevel: 5 };
+  return { minLevel: 3, maxLevel: 4 };
 };
