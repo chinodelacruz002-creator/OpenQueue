@@ -11,6 +11,7 @@ import {
   Trophy,
   UserRound,
   UsersRound,
+  X,
 } from 'lucide-react';
 import { DragEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
@@ -39,6 +40,11 @@ const DEFAULT_COURTS = 4;
 const DEFAULT_MAX_MINUTES = 15;
 const SAVE_DEBOUNCE_MS = 500;
 
+interface BulkPlayerRow extends PlayerForm {
+  rowId: string;
+  savedPlayerId: string;
+}
+
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
 const createDefaultForm = (): PlayerForm => ({
@@ -50,6 +56,20 @@ const createDefaultForm = (): PlayerForm => ({
   preferredPartnerName: '',
   arrivalStatus: 'present',
 });
+
+const createBulkRow = (): BulkPlayerRow => ({
+  rowId: crypto.randomUUID(),
+  name: '',
+  level: 3,
+  ...getLevelRange(3),
+  paddle: '',
+  gripColor: '',
+  preferredPartnerName: '',
+  savedPlayerId: '',
+  arrivalStatus: 'present',
+});
+
+const createBulkRows = () => Array.from({ length: 8 }, createBulkRow);
 
 const createInitialCourts = (): Court[] =>
   Array.from({ length: DEFAULT_COURTS }, (_, index) => ({
@@ -151,30 +171,6 @@ const upsertSavedPlayer = (
   );
 };
 
-const parseBulkPlayers = (rawText: string, form: PlayerForm): Player[] =>
-  rawText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [name, levelText, paddle, gripColor, preferredPartnerName] = line
-        .split(/\t|,/)
-        .map((value) => value.trim());
-      const level = Number(levelText) || form.level;
-      const range = getLevelRange(level);
-
-      return buildPlayer({
-        ...form,
-        name,
-        level,
-        minLevel: range.minLevel,
-        maxLevel: range.maxLevel,
-        paddle: paddle || form.paddle,
-        gripColor: gripColor || form.gripColor,
-        preferredPartnerName: preferredPartnerName || '',
-      });
-    });
-
 const getPlayerIdsInMatch = (match: Match) => match.players.map((player) => player.id);
 
 const isPlayerCompatibleWithCourt = (player: Player, court: Court): boolean =>
@@ -199,7 +195,8 @@ export default function App() {
   const [gripColorOptions, setGripColorOptions] = useState(GRIP_COLOR_OPTIONS);
   const [courts, setCourts] = useState<Court[]>(createInitialCourts);
   const [form, setForm] = useState<PlayerForm>(createDefaultForm);
-  const [bulkText, setBulkText] = useState('');
+  const [bulkRows, setBulkRows] = useState<BulkPlayerRow[]>(createBulkRows());
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [maxMinutes, setMaxMinutes] = useState(DEFAULT_MAX_MINUTES);
   const [selectedCourtId, setSelectedCourtId] = useState('court-1');
   const [sessionDate, setSessionDate] = useState(todayKey);
@@ -334,10 +331,68 @@ export default function App() {
     setForm(createDefaultForm());
   };
 
+  const updateBulkRow = (
+    rowId: string,
+    updates: Partial<BulkPlayerRow>,
+  ) => {
+    setBulkRows((currentRows) =>
+      currentRows.map((row) => (row.rowId === rowId ? { ...row, ...updates } : row)),
+    );
+  };
+
+  const updateBulkName = (rowId: string, name: string) => {
+    const savedPlayer = savedPlayers.find(
+      (player) => player.name.toLowerCase() === name.trim().toLowerCase(),
+    );
+
+    if (!savedPlayer) {
+      updateBulkRow(rowId, { name, savedPlayerId: '' });
+      return;
+    }
+
+    updateBulkRow(rowId, {
+      savedPlayerId: savedPlayer.id,
+      name: savedPlayer.name,
+      level: savedPlayer.level,
+      minLevel: savedPlayer.minLevel,
+      maxLevel: savedPlayer.maxLevel,
+      paddle: savedPlayer.paddle,
+      gripColor: savedPlayer.gripColor,
+      preferredPartnerName: savedPlayer.preferredPartnerName,
+    });
+  };
+
+  const updateBulkLevel = (rowId: string, level: number) => {
+    updateBulkRow(rowId, { level, ...getLevelRange(level) });
+  };
+
+  const addBulkRow = () => {
+    setBulkRows((currentRows) => [...currentRows, createBulkRow()]);
+  };
+
+  const resetBulkRows = () => {
+    setBulkRows(createBulkRows());
+  };
+
+  const removeBulkRow = (rowId: string) => {
+    setBulkRows((currentRows) =>
+      currentRows.length === 1
+        ? currentRows
+        : currentRows.filter((row) => row.rowId !== rowId),
+    );
+  };
+
   const handleBulkAdd = () => {
-    const parsedPlayers = parseBulkPlayers(bulkText, form);
-    addPlayersToSession(parsedPlayers);
-    setBulkText('');
+    const newPlayers = bulkRows
+      .filter((row) => row.name.trim())
+      .map((row) => {
+        const savedPlayer = savedPlayers.find((player) => player.id === row.savedPlayerId);
+        return buildPlayer(row, savedPlayer);
+      });
+
+    addPlayersToSession(newPlayers);
+    setBulkRows(createBulkRows());
+    setIsBulkModalOpen(false);
   };
 
   const addSavedPlayerToSession = (savedPlayer: SavedPlayer) => {
@@ -659,6 +714,165 @@ export default function App() {
     setForm((currentForm) => ({ ...currentForm, [field]: value }));
   };
 
+  const renderBulkModal = () => (
+    <div className="modal-backdrop" role="presentation">
+      <section className="bulk-modal" aria-labelledby="bulk-add-title" role="dialog">
+        <div className="modal-header">
+          <div>
+            <h2 id="bulk-add-title">Bulk Add Players</h2>
+            <p>
+              Type a new player or select an existing saved player. Existing
+              players auto-fill paddle, level, grip color, and partner details.
+            </p>
+          </div>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => setIsBulkModalOpen(false)}
+          >
+            <X size={18} />
+            Close
+          </button>
+        </div>
+
+        <div className="bulk-table-wrap">
+          <table className="bulk-table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Level</th>
+                <th>Min</th>
+                <th>Max</th>
+                <th>Paddle</th>
+                <th>Grip</th>
+                <th>Partner</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {bulkRows.map((row) => (
+                <tr key={row.rowId}>
+                  <td>
+                    <input
+                      list="bulk-saved-player-names"
+                      value={row.name}
+                      onChange={(event) => updateBulkName(row.rowId, event.target.value)}
+                      placeholder="Player name"
+                    />
+                  </td>
+                  <td>
+                    <select
+                      value={row.level}
+                      onChange={(event) =>
+                        updateBulkLevel(row.rowId, Number(event.target.value))
+                      }
+                    >
+                      {LEVELS.map((level) => (
+                        <option value={level} key={level}>
+                          {level}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      value={row.minLevel}
+                      onChange={(event) =>
+                        updateBulkRow(row.rowId, {
+                          minLevel: Number(event.target.value),
+                        })
+                      }
+                    >
+                      {LEVELS.map((level) => (
+                        <option value={level} key={level}>
+                          {level}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      value={row.maxLevel}
+                      onChange={(event) =>
+                        updateBulkRow(row.rowId, {
+                          maxLevel: Number(event.target.value),
+                        })
+                      }
+                    >
+                      {LEVELS.map((level) => (
+                        <option value={level} key={level}>
+                          {level}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      list="paddle-options"
+                      value={row.paddle}
+                      onChange={(event) =>
+                        updateBulkRow(row.rowId, { paddle: event.target.value })
+                      }
+                      placeholder="Paddle"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      list="grip-color-options"
+                      value={row.gripColor}
+                      onChange={(event) =>
+                        updateBulkRow(row.rowId, { gripColor: event.target.value })
+                      }
+                      placeholder="Color"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.preferredPartnerName}
+                      onChange={(event) =>
+                        updateBulkRow(row.rowId, {
+                          preferredPartnerName: event.target.value,
+                        })
+                      }
+                      placeholder="Optional"
+                    />
+                  </td>
+                  <td>
+                    <button
+                      className="ghost-button danger compact-button"
+                      type="button"
+                      onClick={() => removeBulkRow(row.rowId)}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <datalist id="bulk-saved-player-names">
+            {savedPlayers.map((player) => (
+              <option value={player.name} key={player.id} />
+            ))}
+          </datalist>
+        </div>
+
+        <div className="bulk-actions">
+          <button className="ghost-button" type="button" onClick={addBulkRow}>
+            <Plus size={18} />
+            Add row
+          </button>
+          <button className="ghost-button" type="button" onClick={resetBulkRows}>
+            Reset rows
+          </button>
+          <button className="primary-button" type="button" onClick={handleBulkAdd}>
+            Add players
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+
   const renderPlayerView = () => (
     <section className="player-view">
       <section className="panel player-queue-panel">
@@ -731,6 +945,7 @@ export default function App() {
 
   return (
     <main className="app-shell">
+      {isBulkModalOpen && renderBulkModal()}
       <section className="hero">
         <div>
           <span className="eyebrow">Admin-only open play manager</span>
@@ -911,15 +1126,17 @@ export default function App() {
             <UsersRound />
             <h2>Bulk Add</h2>
           </div>
-          <textarea
-            className="bulk-input"
-            value={bulkText}
-            onChange={(event) => setBulkText(event.target.value)}
-            placeholder="Paste Excel rows: Name, Level, Paddle, Grip Color, Preferred Partner"
-          />
-          <button className="ghost-button" type="button" onClick={handleBulkAdd}>
+          <p className="hint">
+            Open a table to type new players or select saved players. Saved players
+            auto-fill paddle, grip color, and level settings.
+          </p>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => setIsBulkModalOpen(true)}
+          >
             <Plus size={18} />
-            Add pasted players
+            Open bulk add table
           </button>
 
           <div className="panel-title compact">
