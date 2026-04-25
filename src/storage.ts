@@ -171,3 +171,29 @@ const uniqueValues = (values: string[]): string[] =>
   );
 
 const getTodayKey = (): string => new Date().toISOString().slice(0, 10);
+
+/**
+ * Fires when `open_play_state` changes in Supabase (requires table in the `supabase_realtime` publication).
+ */
+export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) => {
+  if (!supabase) {
+    return () => {
+      // No-op: Realtime is unavailable without a client.
+    };
+  }
+
+  const channel = supabase
+    .channel('open_play_state_changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'open_play_state' },
+      () => {
+        onChange();
+      },
+    )
+    .subscribe();
+
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+};

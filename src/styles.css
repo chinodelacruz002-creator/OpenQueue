@@ -106,11 +106,113 @@ button {
   padding: 1rem 1rem 0;
 }
 
+.local-only-banner {
+  margin: 0;
+  padding: 0.9rem 1.5rem;
+  color: #7c2d12;
+  background: #ffedd5;
+  border-bottom: 1px solid #fdba74;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.local-only-banner code {
+  padding: 0 0.2rem;
+  color: #9a3412;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+}
+
+.hero-slim {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 1.4rem 1.75rem;
+}
+
+.hero-slim h1 {
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+
+.public-kiosk-status {
+  align-self: center;
+  padding: 0.65rem 1rem;
+  color: #143044;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 0.75rem;
+}
+
+.public-nav {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem 0;
+}
+
+.public-view-link-row {
+  margin: 0 0 0.75rem;
+  grid-column: 1 / -1;
+}
+
+.bulk-error {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.75rem;
+  color: #7f1d1d;
+  background: #fee2e2;
+  border-radius: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.standings-table-wrap {
+  overflow: auto;
+}
+
+.standings-table {
+  width: 100%;
+  min-width: 20rem;
+  border-collapse: collapse;
+}
+
+.standings-table th,
+.standings-table td {
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid #dbe4eb;
+}
+
+.standings-table th {
+  color: #475569;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+tr.roster-subhead td {
+  padding: 0.75rem 0.4rem 0.35rem;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: #f0f4f8;
+  border-top: 1px solid #dbe4eb;
+  border-bottom: 1px solid #dbe4eb;
+}
+
+tr.roster-inactive {
+  background: #fafbfc;
+}
+
 .player-view {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
   gap: 1rem;
   padding: 1rem;
+}
+
+.player-view.standings-view {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .public-list {

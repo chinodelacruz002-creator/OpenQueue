@@ -11,7 +11,7 @@ import {
   UsersRound,
   X,
 } from 'lucide-react';
-import { DragEvent, useEffect, useMemo, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
 import {
   buildAutoAssignments,
@@ -20,7 +20,12 @@ import {
   getAvailablePlayers,
   getElapsedSeconds,
 } from './scheduler';
-import { hasSupabaseConfig, loadOpenPlayData, saveOpenPlayData } from './storage';
+import {
+  hasSupabaseConfig,
+  loadOpenPlayData,
+  saveOpenPlayData,
+  subscribeOpenPlayRealtime,
+} from './storage';
 import type {
   AppData,
   AutoAssignment,
@@ -37,6 +42,14 @@ import './styles.css';
 const DEFAULT_COURTS = 4;
 const DEFAULT_MAX_MINUTES = 15;
 const SAVE_DEBOUNCE_MS = 500;
+
+const normalizePlayerName = (name: string) => name.trim().toLowerCase();
+
+const getInitialViewParam = () => new URLSearchParams(window.location.search).get('view');
+const isLockedPublicView = (() => {
+  const param = getInitialViewParam();
+  return param === 'player' || param === 'standings';
+})();
 
 interface BulkPlayerRow extends PlayerForm {
   rowId: string;
@@ -169,10 +182,10 @@ const replacePlayerInMatch = (
 });
 
 export default function App() {
-  const playerQueueUrl = `${window.location.pathname}?view=player`;
-  const initialViewMode = new URLSearchParams(window.location.search).get('view') === 'player'
-    ? 'player'
-    : 'admin';
+  const pagePath = window.location.pathname;
+  const playerQueueUrl = `${pagePath}?view=player`;
+  const standingsUrl = `${pagePath}?view=standings`;
+  const initialViewParam = getInitialViewParam();
   const [players, setPlayers] = useState<Player[]>([]);
   const [savedPlayers, setSavedPlayers] = useState<SavedPlayer[]>([]);
   const [paddleOptions, setPaddleOptions] = useState(PADDLE_OPTIONS);
@@ -185,8 +198,43 @@ export default function App() {
   const [selectedCourtId, setSelectedCourtId] = useState('court-1');
   const [sessionDate, setSessionDate] = useState(todayKey);
   const [saveStatus, setSaveStatus] = useState('Loading saved players...');
-  const [viewMode, setViewMode] = useState<'admin' | 'player'>(initialViewMode);
+  const [viewMode, setViewMode] = useState<'admin' | 'player'>(() =>
+    isLockedPublicView ? 'player' : (initialViewParam === 'player' ? 'player' : 'admin'),
+  );
+  const [publicPage, setPublicPage] = useState<'queue' | 'standings'>(() =>
+    initialViewParam === 'standings' ? 'standings' : 'queue',
+  );
+  const [bulkAddError, setBulkAddError] = useState('');
   const [now, setNow] = useState(0);
+
+  const goToViewMode = (mode: 'admin' | 'player') => {
+    if (isLockedPublicView) {
+      return;
+    }
+    setViewMode(mode);
+  };
+
+  const setPublicViewAndUrl = (page: 'queue' | 'standings') => {
+    setPublicPage(page);
+    const view = page === 'standings' ? 'standings' : 'player';
+    window.history.replaceState(null, '', `${pagePath}?view=${view}`);
+  };
+
+  const applyLoad = useCallback((data: AppData | null, kind: 'initial' | 'sync') => {
+    const appData = data ?? createAppData();
+    setSessionDate(appData.sessionDate || todayKey());
+    setPlayers(appData.players ?? []);
+    setCourts(appData.courts?.length ? appData.courts : createInitialCourts());
+    setMaxMinutes(appData.maxMinutes ?? DEFAULT_MAX_MINUTES);
+    setSavedPlayers(appData.savedPlayers ?? []);
+    setPaddleOptions(mergeOptions(PADDLE_OPTIONS, appData.savedPaddles ?? []));
+    setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, appData.savedGripColors ?? []));
+    if (kind === 'initial') {
+      setSaveStatus(hasSupabaseConfig ? 'Loaded from Supabase' : 'Loaded from this browser');
+    } else {
+      setSaveStatus(hasSupabaseConfig ? 'Synced from Supabase' : 'Synced locally');
+    }
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -195,51 +243,52 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-
-    loadOpenPlayData().then((data) => {
+    void loadOpenPlayData().then((data) => {
       if (!mounted) {
         return;
       }
-
-      const appData = data ?? createAppData();
-      setSessionDate(appData.sessionDate || todayKey());
-      setPlayers(appData.players ?? []);
-      setCourts(appData.courts?.length ? appData.courts : createInitialCourts());
-      setMaxMinutes(appData.maxMinutes ?? DEFAULT_MAX_MINUTES);
-      setSavedPlayers(appData.savedPlayers ?? []);
-      setPaddleOptions(mergeOptions(PADDLE_OPTIONS, appData.savedPaddles ?? []));
-      setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, appData.savedGripColors ?? []));
-      setSaveStatus(hasSupabaseConfig ? 'Loaded from Supabase' : 'Loaded from this browser');
+      applyLoad(data, 'initial');
     });
-
-    const refreshTimer = window.setInterval(() => {
-      if (viewMode !== 'player') {
-        return;
-      }
-
-      loadOpenPlayData().then((data) => {
-        if (!mounted || !data) {
-          return;
-        }
-
-        setSessionDate(data.sessionDate || todayKey());
-        setPlayers(data.players ?? []);
-        setCourts(data.courts ?? createInitialCourts());
-        setMaxMinutes(data.maxMinutes ?? DEFAULT_MAX_MINUTES);
-        setSavedPlayers(data.savedPlayers ?? []);
-        setPaddleOptions(mergeOptions(PADDLE_OPTIONS, data.savedPaddles ?? []));
-        setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, data.savedGripColors ?? []));
-        setSaveStatus(hasSupabaseConfig ? 'Synced from Supabase' : 'Synced locally');
-      });
-    }, 5000);
 
     return () => {
       mounted = false;
-      window.clearInterval(refreshTimer);
     };
-  }, [viewMode]);
+  }, [applyLoad]);
 
   useEffect(() => {
+    if (!hasSupabaseConfig) {
+      return;
+    }
+    return subscribeOpenPlayRealtime(() => {
+      void loadOpenPlayData().then((data) => {
+        applyLoad(data, 'sync');
+      });
+    });
+  }, [applyLoad]);
+
+  useEffect(() => {
+    let timer = 0;
+    const needsPoll = !hasSupabaseConfig && (isLockedPublicView || viewMode === 'player');
+    if (hasSupabaseConfig) {
+      timer = window.setInterval(() => {
+        void loadOpenPlayData().then((data) => applyLoad(data, 'sync'));
+      }, 25000);
+    } else if (needsPoll) {
+      timer = window.setInterval(() => {
+        void loadOpenPlayData().then((data) => applyLoad(data, 'sync'));
+      }, 5000);
+    }
+    return () => {
+      if (timer) {
+        window.clearInterval(timer);
+      }
+    };
+  }, [applyLoad, hasSupabaseConfig, isLockedPublicView, viewMode]);
+
+  useEffect(() => {
+    if (isLockedPublicView) {
+      return;
+    }
     const saveTimer = window.setTimeout(() => {
       const data: AppData = {
         sessionDate,
@@ -286,6 +335,31 @@ export default function App() {
         })),
       ),
     [queueGroups],
+  );
+
+  const { rosterActive, rosterInactive } = useMemo(() => {
+    const active: Player[] = [];
+    const inactive: Player[] = [];
+    for (const player of players) {
+      if (player.arrivalStatus === 'left' || player.arrivalStatus === 'away') {
+        inactive.push(player);
+      } else {
+        active.push(player);
+      }
+    }
+    return { rosterActive: active, rosterInactive: inactive };
+  }, [players]);
+
+  const standingsRows = useMemo(
+    () =>
+      [...players].sort((a, b) => {
+        const byRank = b.rankingScore - a.rankingScore;
+        if (byRank !== 0) {
+          return byRank;
+        }
+        return a.name.localeCompare(b.name);
+      }),
+    [players],
   );
 
   const bulkRowsPerColumn = Math.ceil(bulkRows.length / 2);
@@ -360,21 +434,63 @@ export default function App() {
     setBulkRows(createBulkRows());
   };
 
-  const removeBulkRow = (rowId: string) => {
+  const clearBulkRow = (rowId: string) => {
     setBulkRows((currentRows) =>
-      currentRows.length === 1
-        ? currentRows
-        : currentRows.filter((row) => row.rowId !== rowId),
+      currentRows.map((row) =>
+        row.rowId === rowId ? { ...createBulkRow(), rowId: row.rowId } : row,
+      ),
     );
   };
 
   const handleBulkAdd = () => {
-    const newPlayers = bulkRows
-      .filter((row) => row.name.trim())
-      .map((row) => {
-        const savedPlayer = savedPlayers.find((player) => player.id === row.savedPlayerId);
-        return buildPlayer(row, savedPlayer);
-      });
+    setBulkAddError('');
+
+    const namedRows = bulkRows.filter((row) => row.name.trim());
+    const seenInForm = new Set<string>();
+
+    for (const row of namedRows) {
+      const key = normalizePlayerName(row.name);
+      if (seenInForm.has(key)) {
+        setBulkAddError('Duplicate name in the form. Remove or fix duplicate rows.');
+        return;
+      }
+      seenInForm.add(key);
+    }
+
+    const waitingNames = new Set(
+      players
+        .filter((player) => player.arrivalStatus === 'present')
+        .map((player) => normalizePlayerName(player.name)),
+    );
+    for (const row of namedRows) {
+      if (waitingNames.has(normalizePlayerName(row.name))) {
+        setBulkAddError(
+          `Already in the waiting queue: ${row.name.trim()}. You cannot add the same person twice.`,
+        );
+        return;
+      }
+    }
+
+    const onCourt = new Set(
+      players
+        .filter(
+          (player) => player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing',
+        )
+        .map((player) => normalizePlayerName(player.name)),
+    );
+    for (const row of namedRows) {
+      if (onCourt.has(normalizePlayerName(row.name))) {
+        setBulkAddError(
+          `This person is already on a court: ${row.name.trim()}. Finish or reset the match first.`,
+        );
+        return;
+      }
+    }
+
+    const newPlayers = namedRows.map((row) => {
+      const savedPlayer = savedPlayers.find((player) => player.id === row.savedPlayerId);
+      return buildPlayer(row, savedPlayer);
+    });
 
     addPlayersToSession(newPlayers);
     setBulkRows(createBulkRows());
@@ -433,10 +549,8 @@ export default function App() {
     );
   };
 
-  const removePlayer = (playerId: string) => {
-    setPlayers((currentPlayers) =>
-      currentPlayers.filter((player) => player.id !== playerId),
-    );
+  const markPlayerLeft = (playerId: string) => {
+    updatePlayer(playerId, { arrivalStatus: 'left' });
   };
 
   const buildMatch = (groupPlayerIds: string[]): Match | null => {
@@ -688,7 +802,10 @@ export default function App() {
           <button
             className="ghost-button"
             type="button"
-            onClick={() => setIsBulkModalOpen(false)}
+            onClick={() => {
+              setBulkAddError('');
+              setIsBulkModalOpen(false);
+            }}
           >
             <X size={18} />
             Close
@@ -795,7 +912,7 @@ export default function App() {
                         <button
                           className="ghost-button danger compact-button"
                           type="button"
-                          onClick={() => removeBulkRow(row.rowId)}
+                          onClick={() => clearBulkRow(row.rowId)}
                         >
                           X
                         </button>
@@ -823,6 +940,7 @@ export default function App() {
           </datalist>
         </div>
 
+        {bulkAddError ? <p className="bulk-error" role="alert">{bulkAddError}</p> : null}
         <div className="bulk-actions">
           <button className="ghost-button" type="button" onClick={addBulkRow}>
             <Plus size={18} />
@@ -896,16 +1014,23 @@ export default function App() {
 
   const renderPlayerView = () => (
     <section className="player-view">
+      {!isLockedPublicView && (
+        <p className="public-view-link-row">
+          <a className="ghost-button" href={standingsUrl}>
+            View full standings
+          </a>
+        </p>
+      )}
       <section className="panel player-queue-panel">
         <div className="panel-title">
           <UsersRound />
-          <h2>Your Queue</h2>
+          <h2>Your queue</h2>
         </div>
         <div className="public-list">
           {playerQueueRows.map((row) => (
             <article className="public-card" key={row.player.id}>
               <strong>
-                #{row.queuePosition} {row.player.name}
+                Group #{row.queuePosition} — {row.player.name}
               </strong>
               <span>
                 Waiting with:{' '}
@@ -913,7 +1038,7 @@ export default function App() {
                   ? row.groupMates.map((player) => player.name).join(', ')
                   : 'forming group'}
               </span>
-              <small>Standby queue</small>
+              <small>{scoreLabel(row.player)} · Standby</small>
             </article>
           ))}
           {!playerQueueRows.length && (
@@ -925,7 +1050,7 @@ export default function App() {
       <section className="panel">
         <div className="panel-title">
           <Clock3 />
-          <h2>Now Playing / Loaded</h2>
+          <h2>Now playing / loaded</h2>
         </div>
         <div className="public-list">
           {courts.map((court) => {
@@ -952,10 +1077,92 @@ export default function App() {
     </section>
   );
 
+  const renderStandingsView = () => (
+    <section className="player-view standings-view">
+      <section className="panel">
+        <div className="panel-title">
+          <Trophy />
+          <h2>Standings (today&apos;s session)</h2>
+        </div>
+        <div className="standings-table-wrap">
+          <table className="standings-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Record</th>
+                <th>Rank score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {standingsRows.map((player, index) => (
+                <tr key={player.id}>
+                  <td>{index + 1}</td>
+                  <td>{player.name}</td>
+                  <td>
+                    {player.wins}W — {player.losses}L
+                  </td>
+                  <td>{player.rankingScore}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!standingsRows.length && (
+            <p className="hint">No players in today&apos;s session yet.</p>
+          )}
+        </div>
+      </section>
+    </section>
+  );
+
+  if (isLockedPublicView) {
+    return (
+      <main className="app-shell public-kiosk">
+        <section className="hero hero-slim">
+          <div>
+            <span className="eyebrow">Open play</span>
+            <h1>OpenQueue</h1>
+            <p>
+              {sessionDate}. Live queue and standings. Ask staff for the admin link; this
+              page is read-only.
+            </p>
+          </div>
+          <div className="public-kiosk-status">
+            <span>{saveStatus}</span>
+          </div>
+        </section>
+        <div className="public-nav view-toggle">
+          <button
+            className={publicPage === 'queue' ? 'primary-button' : 'ghost-button'}
+            onClick={() => setPublicViewAndUrl('queue')}
+            type="button"
+          >
+            Queue
+          </button>
+          <button
+            className={publicPage === 'standings' ? 'primary-button' : 'ghost-button'}
+            onClick={() => setPublicViewAndUrl('standings')}
+            type="button"
+          >
+            Standings
+          </button>
+        </div>
+        {publicPage === 'standings' ? renderStandingsView() : renderPlayerView()}
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       {isBulkModalOpen && renderBulkModal()}
       {isSettingsModalOpen && renderSettingsModal()}
+      {!hasSupabaseConfig && (
+        <div className="local-only-banner" role="status">
+          Not connected to Supabase at build time. Data is only saved in this browser. Add
+          <code> VITE_SUPABASE_URL</code> and <code> VITE_SUPABASE_PUBLISHABLE_KEY</code> to
+          GitHub Actions secrets for a shared live site.
+        </div>
+      )}
       <section className="hero">
         <div>
           <span className="eyebrow">Admin open play manager</span>
@@ -984,13 +1191,15 @@ export default function App() {
       <div className="view-toggle">
         <button
           className={viewMode === 'admin' ? 'primary-button' : 'ghost-button'}
-          onClick={() => setViewMode('admin')}
+          onClick={() => goToViewMode('admin')}
+          type="button"
         >
           Admin View
         </button>
         <button
           className={viewMode === 'player' ? 'primary-button' : 'ghost-button'}
-          onClick={() => setViewMode('player')}
+          onClick={() => goToViewMode('player')}
+          type="button"
         >
           Player Queue View
         </button>
@@ -1009,7 +1218,10 @@ export default function App() {
               <button
                 className="primary-button"
                 type="button"
-                onClick={() => setIsBulkModalOpen(true)}
+                onClick={() => {
+                  setBulkAddError('');
+                  setIsBulkModalOpen(true);
+                }}
               >
                 <Plus size={18} />
                 Add / edit players
@@ -1341,7 +1553,7 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {players.map((player) => (
+                  {rosterActive.map((player) => (
                     <tr key={player.id}>
                       <td>
                         <input
@@ -1434,11 +1646,110 @@ export default function App() {
                       <td>
                         <button
                           className="ghost-button danger compact-button"
-                          onClick={() => removePlayer(player.id)}
+                          onClick={() => markPlayerLeft(player.id)}
+                          type="button"
                         >
-                          Remove
+                          Mark left
                         </button>
                       </td>
+                    </tr>
+                  ))}
+                  {rosterInactive.length > 0 && (
+                    <tr className="roster-subhead">
+                      <td colSpan={9}>Left or unavailable (still listed for today)</td>
+                    </tr>
+                  )}
+                  {rosterInactive.map((player) => (
+                    <tr className="roster-inactive" key={player.id}>
+                      <td>
+                        <input
+                          value={player.name}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { name: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={player.arrivalStatus}
+                          onChange={(event) =>
+                            updatePlayer(player.id, {
+                              arrivalStatus: event.target.value as Player['arrivalStatus'],
+                            })
+                          }
+                        >
+                          <option value="present">Waiting</option>
+                          <option value="away">Unavailable</option>
+                          <option value="assigned">Assigned</option>
+                          <option value="playing">Playing</option>
+                          <option value="left">Left</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={player.level}
+                          onChange={(event) =>
+                            updatePlayer(player.id, {
+                              level: Number(event.target.value),
+                              ...getLevelRange(Number(event.target.value)),
+                            })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={player.minLevel}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { minLevel: Number(event.target.value) })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={player.maxLevel}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { maxLevel: Number(event.target.value) })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          list="paddle-options"
+                          value={player.paddle}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { paddle: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          list="grip-color-options"
+                          value={player.gripColor}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { gripColor: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td>{scoreLabel(player)}</td>
+                      <td>—</td>
                     </tr>
                   ))}
                 </tbody>

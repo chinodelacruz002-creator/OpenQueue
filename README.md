@@ -20,9 +20,10 @@ track person-by-person results.
 - Drag a group to a court or use automatic assignments for ready courts.
 - Remove an unavailable player from a loaded, not-yet-started court and
   automatically fill the slot with the next compatible standby player.
-- Share `?view=player` so players can see queue position and expected groupmates
-  on their phones, while assigned/playing players are shown only under loaded or
-  playing courts.
+- Share `?view=player` so players can see queue position, record, rank, and
+  expected groupmates on their phones, while assigned/playing players are shown
+  only under loaded or playing courts. Use `?view=standings` for a read-only
+  standings board (same public lock as the player link).
 - Start a court timer, mark individual winners, and return players to the queue.
 - Save wins, losses, games played, and ranking score for the next open play.
 - Mark late, unavailable, or leaving players directly from the roster.
@@ -99,10 +100,20 @@ Supabase's Next.js setup guide can be reused. The `@supabase/ssr` package and
 middleware files from that guide are only needed for Next.js apps; OpenQueue is
 a Vite app and uses the browser Supabase client.
 
-For GitHub Pages, add these repository secrets before deploying:
+For GitHub Pages, add these **repository** secrets and variables under **Settings → Secrets and variables → Actions** before deploying, then run the deploy workflow (or push to `main`) so the build inlines the keys:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+If the live site does not show the same data on every device, the build almost certainly had no env vars: each browser falls back to its own **local storage** only. Fix the secrets and redeploy.
+
+### Realtime (optional, recommended for live updates)
+
+For instant cross-browser updates through Supabase Realtime, add `open_play_state` to the Realtime publication (run in the SQL editor):
+
+```sql
+alter publication supabase_realtime add table open_play_state;
+```
 
 ## Getting Started
 
