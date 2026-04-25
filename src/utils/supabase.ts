@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl =
   import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.VITE_NEXT_PUBLIC_SUPABASE_URL;
@@ -9,6 +9,7 @@ const supabasePublishableKey =
 
 export const hasSupabaseConfig = Boolean(supabaseUrl && supabasePublishableKey);
 
-export const supabase = hasSupabaseConfig
-  ? createClient(supabaseUrl, supabasePublishableKey)
+/** Browser client; `null` when env vars are missing (local-only mode). */
+export const supabase: SupabaseClient | null = hasSupabaseConfig
+  ? createClient(supabaseUrl as string, supabasePublishableKey as string)
   : null;
