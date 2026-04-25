@@ -1,0 +1,40 @@
+{
+  "name": "openqueue",
+  "version": "1.0.0",
+  "description": "Admin-only open play stacking and court assignment web app",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chinodelacruz002-creator/OpenQueue.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/chinodelacruz002-creator/OpenQueue/issues"
+  },
+  "homepage": "https://github.com/chinodelacruz002-creator/OpenQueue#readme",
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "lucide-react": "^1.11.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^10.2.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "typescript-eslint": "^8.59.0"
+  }
+}
