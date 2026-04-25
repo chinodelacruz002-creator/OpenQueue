@@ -278,24 +278,14 @@ export default function App() {
 
   const playerQueueRows = useMemo(
     () =>
-      players.map((player) => {
-        const loadedCourt = courts.find((court) =>
-          court.match?.players.some((matchPlayer) => matchPlayer.id === player.id),
-        );
-        const queueGroupIndex = queueGroups.findIndex((group) =>
-          group.playerIds.includes(player.id),
-        );
-        const queueGroup = queueGroupIndex >= 0 ? queueGroups[queueGroupIndex] : null;
-
-        return {
+      queueGroups.flatMap((group, groupIndex) =>
+        group.players.map((player) => ({
           player,
-          loadedCourt,
-          queuePosition: queueGroupIndex >= 0 ? queueGroupIndex + 1 : null,
-          groupMates:
-            queueGroup?.players.filter((groupPlayer) => groupPlayer.id !== player.id) ?? [],
-        };
-      }),
-    [courts, players, queueGroups],
+          queuePosition: groupIndex + 1,
+          groupMates: group.players.filter((groupPlayer) => groupPlayer.id !== player.id),
+        })),
+      ),
+    [queueGroups],
   );
 
   const bulkRowsPerColumn = Math.ceil(bulkRows.length / 2);
@@ -890,28 +880,15 @@ export default function App() {
           {playerQueueRows.map((row) => (
             <article className="public-card" key={row.player.id}>
               <strong>
-                {row.queuePosition ? `#${row.queuePosition}` : row.loadedCourt?.name ?? '-'}{' '}
-                {row.player.name}
+                #{row.queuePosition} {row.player.name}
               </strong>
               <span>
-                {row.loadedCourt
-                  ? `Assigned with ${row.loadedCourt.match?.players
-                      .filter((player) => player.id !== row.player.id)
-                      .map((player) => player.name)
-                      .join(', ')}`
-                  : `Waiting with ${
-                      row.groupMates.length
-                        ? row.groupMates.map((player) => player.name).join(', ')
-                        : 'forming group'
-                    }`}
+                Waiting with:{' '}
+                {row.groupMates.length
+                  ? row.groupMates.map((player) => player.name).join(', ')
+                  : 'forming group'}
               </span>
-              <small>
-                {row.loadedCourt
-                  ? `${row.loadedCourt.name} · ${row.loadedCourt.status}`
-                  : row.queuePosition
-                    ? 'Standby queue'
-                    : row.player.arrivalStatus}
-              </small>
+              <small>Standby queue</small>
             </article>
           ))}
           {!playerQueueRows.length && (
@@ -929,14 +906,15 @@ export default function App() {
           {courts.map((court) => {
             const elapsedSeconds = getElapsedSeconds(court.match, now);
             const playerNames = court.match?.players.map((player) => player.name).join(', ');
+            const emptyCourtLabel =
+              court.status === 'reserved' || court.status === 'unavailable'
+                ? court.status
+                : 'Available for next group';
 
             return (
-              <article className="public-card court-public-card" key={court.id}>
+              <article className={`public-card court-public-card ${court.status}`} key={court.id}>
                 <strong>{court.name}</strong>
-                <span>
-                  {playerNames ||
-                    (court.status === 'reserved' ? 'Reserved' : 'Available for next group')}
-                </span>
+                <span>{playerNames || emptyCourtLabel}</span>
                 <small>
                   Levels {court.minLevel}-{court.maxLevel} · {court.status}
                   {court.match?.startedAt ? ` · ${formatElapsedTime(elapsedSeconds)}` : ''}
@@ -1328,6 +1306,7 @@ export default function App() {
                     >
                       <option value="ready">Ready</option>
                       <option value="reserved">Reserved</option>
+                      <option value="unavailable">Unavailable</option>
                       <option value="loaded">Loaded</option>
                       <option value="playing">Playing</option>
                     </select>

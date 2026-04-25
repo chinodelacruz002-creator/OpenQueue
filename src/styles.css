@@ -138,6 +138,47 @@ button {
   color: #66788a;
 }
 
+.court-public-card.ready {
+  border-left: 0.35rem solid #16a34a;
+}
+
+.court-public-card.reserved {
+  border-left: 0.35rem solid #f97316;
+}
+
+.court-public-card.loaded {
+  border-left: 0.35rem solid #2563eb;
+}
+
+.court-public-card.playing {
+  border-left: 0.35rem solid #0d9488;
+}
+
+.court-public-card.unavailable {
+  border-left: 0.35rem solid #dc2626;
+}
+
+.court-public-card.ready {
+  border-left: 0.45rem solid #16a34a;
+}
+
+.court-public-card.reserved {
+  border-left: 0.45rem solid #f97316;
+}
+
+.court-public-card.loaded {
+  border-left: 0.45rem solid #2563eb;
+}
+
+.court-public-card.playing {
+  border-left: 0.45rem solid #0d9488;
+}
+
+.court-public-card.unavailable {
+  border-left: 0.45rem solid #dc2626;
+  background: #fef2f2;
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr) minmax(18rem, 22rem);
@@ -347,27 +388,35 @@ select {
   display: grid;
   gap: 0.9rem;
   padding: 1rem;
-  background: #ffffff;
+  border-width: 2px;
+  box-shadow: 0 1rem 2.5rem rgba(25, 55, 82, 0.08);
 }
 
 .court-card.ready,
 .court-card.selected {
-  border-color: #34d399;
+  background: linear-gradient(180deg, #dcfce7, #f0fdf4);
+  border-color: #16a34a;
 }
 
 .court-card.reserved {
-  background: #fff7ed;
-  border-color: #fdba74;
+  background: linear-gradient(180deg, #ffedd5, #fff7ed);
+  border-color: #f97316;
 }
 
 .court-card.loaded {
-  background: #eff6ff;
-  border-color: #93c5fd;
+  background: linear-gradient(180deg, #dbeafe, #eff6ff);
+  border-color: #2563eb;
 }
 
 .court-card.playing {
-  background: #f1fdf7;
-  border-color: #59d5a7;
+  background: linear-gradient(180deg, #ccfbf1, #f0fdfa);
+  border-color: #0d9488;
+}
+
+.court-card.unavailable {
+  background: linear-gradient(180deg, #fee2e2, #fef2f2);
+  border-color: #dc2626;
+  opacity: 0.88;
 }
 
 .court-header input {
@@ -788,6 +837,6 @@ select {
   }
 
   .court-public-card {
-    border-left: 0.35rem solid #34d399;
+    border-left-width: 0.35rem;
   }
 }

@@ -11,14 +11,16 @@ courts, start match timers, and track person-by-person results.
 - Auto-fill level bandwidth defaults by player level. New players default to
   level 3 with a 2-3 accepted range; supported levels are 1-4.
 - Reuse saved player profiles, paddle options, and grip color options.
-- Configure the number of courts, each court name, court level range, and max
-  minutes of play.
+- Configure the number of courts, each court name, court level range, max
+  minutes of play, and visible court status colors for ready, reserved,
+  unavailable, loaded, and playing.
 - View four-player standby groups and the courts each group can play on.
 - Drag a group to a court or use automatic assignments for ready courts.
 - Remove an unavailable player from a loaded, not-yet-started court and
   automatically fill the slot with the next compatible standby player.
-- Switch to a player queue view so players can see their queue position,
-  expected groupmates, and currently loaded or playing courts.
+- Switch to a player queue view so waiting players can see their queue position
+  and expected groupmates, while assigned/playing players are shown only under
+  currently loaded or playing courts.
 - Start a court timer, mark individual winners, and return players to the queue.
 - Save wins, losses, games played, and ranking score for the next open play.
 - Mark late, unavailable, or leaving players directly from the roster.

@@ -1,6 +1,6 @@
 export type PlayerStatus = 'present' | 'assigned' | 'playing' | 'away' | 'left';
 
-export type CourtStatus = 'ready' | 'reserved' | 'loaded' | 'playing';
+export type CourtStatus = 'ready' | 'reserved' | 'loaded' | 'playing' | 'unavailable';
 
 export type LastResult = 'won' | 'lost' | null;
 
