@@ -1,6 +1,8 @@
-import { createClient } from '@supabase/supabase-js';
 import { LOCAL_STORAGE_KEY } from './constants';
 import type { AppData, Court, Player, SavedPlayer } from './types';
+import { hasSupabaseConfig, supabase } from './utils/supabase';
+
+export { hasSupabaseConfig };
 
 interface PlayerRow {
   id: string;
@@ -28,21 +30,7 @@ interface OpenPlayStateRow {
   updated_at: string;
 }
 
-const supabaseUrl =
-  import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.VITE_NEXT_PUBLIC_SUPABASE_URL;
-const supabasePublishableKey =
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
-  import.meta.env.VITE_SUPABASE_ANON_KEY ??
-  import.meta.env.VITE_NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-const supabase =
-  supabaseUrl && supabasePublishableKey
-    ? createClient(supabaseUrl, supabasePublishableKey)
-    : null;
-
 const OPEN_PLAY_STATE_ID = 'current';
-
-export const hasSupabaseConfig = Boolean(supabase);
 
 export const loadOpenPlayData = async (): Promise<AppData | null> => {
   if (!supabase) {

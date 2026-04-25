@@ -88,6 +88,9 @@ VITE_SUPABASE_URL=your-project-url
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
+The browser client lives in `src/utils/supabase.ts` and is used by
+`src/storage.ts` for both saved player profiles and live open play state.
+
 The app also accepts `NEXT_PUBLIC_SUPABASE_URL` and
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` as aliases, so the values copied from
 Supabase's Next.js setup guide can be reused. The `@supabase/ssr` package and
