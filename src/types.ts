@@ -1,4 +1,4 @@
-export type PlayerStatus = 'present' | 'playing' | 'away' | 'left';
+export type PlayerStatus = 'present' | 'assigned' | 'playing' | 'away' | 'left';
 
 export type CourtStatus = 'ready' | 'reserved' | 'loaded' | 'playing';
 
@@ -6,6 +6,7 @@ export type LastResult = 'won' | 'lost' | null;
 
 export interface Player {
   id: string;
+  persistentId: string | null;
   name: string;
   level: number;
   minLevel: number;
@@ -21,6 +22,22 @@ export interface Player {
   waitScore: number;
   lastResult: LastResult;
   lockedGroupId: string | null;
+  rankingScore: number;
+}
+
+export interface SavedPlayer {
+  id: string;
+  name: string;
+  level: number;
+  minLevel: number;
+  maxLevel: number;
+  paddle: string;
+  gripColor: string;
+  preferredPartnerName: string;
+  wins: number;
+  losses: number;
+  gamesPlayed: number;
+  rankingScore: number;
 }
 
 export interface Court {
@@ -32,16 +49,12 @@ export interface Court {
   match: Match | null;
 }
 
-export interface MatchTeam {
-  id: 'team-a' | 'team-b';
-  players: Player[];
-}
-
 export interface Match {
   id: string;
   startedAt: number | null;
   durationMinutes: number;
-  teams: MatchTeam[];
+  players: Player[];
+  winnerIds: string[];
 }
 
 export interface QueueGroup {
@@ -81,4 +94,21 @@ export interface PlayerForm {
   gripColor: string;
   preferredPartnerName: string;
   arrivalStatus: PlayerStatus;
+}
+
+export interface OpenPlaySession {
+  sessionDate: string;
+  players: Player[];
+  courts: Court[];
+  maxMinutes: number;
+  paddleOptions: string[];
+  gripColorOptions: string[];
+}
+
+export interface AppData {
+  sessionDate: string;
+  players: Player[];
+  savedPlayers: SavedPlayer[];
+  savedPaddles: string[];
+  savedGripColors: string[];
 }

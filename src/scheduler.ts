@@ -83,8 +83,8 @@ export const formatElapsedTime = (seconds: number): string => {
 };
 
 const comparePlayersByPriority = (first: Player, second: Player): number => {
-  const secondScore = second.waitScore + second.wins * 3 - second.losses;
-  const firstScore = first.waitScore + first.wins * 3 - first.losses;
+  const secondScore = second.waitScore + second.rankingScore + second.wins * 3 - second.losses;
+  const firstScore = first.waitScore + first.rankingScore + first.wins * 3 - first.losses;
   const scoreDifference = secondScore - firstScore;
 
   if (scoreDifference !== 0) {
@@ -130,7 +130,8 @@ const createQueueGroup = (players: Player[], courts: Court[]): QueueGroup => {
       .filter((court) => isGroupCompatibleWithCourt(players, court))
       .map((court) => court.id),
     priorityScore: players.reduce(
-      (sum, player) => sum + player.waitScore + player.wins * 3 - player.losses,
+      (sum, player) =>
+        sum + player.waitScore + player.rankingScore + player.wins * 3 - player.losses,
       0,
     ),
     reason: players.some((player) => player.preferredPartnerName)

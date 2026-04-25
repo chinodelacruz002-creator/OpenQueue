@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/chinodelacruz002-creator/OpenQueue#readme",
   "dependencies": {
+    "@supabase/supabase-js": "^2.104.1",
     "@vitejs/plugin-react": "^6.0.1",
     "lucide-react": "^1.11.0",
     "react": "^19.2.5",
