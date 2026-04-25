@@ -1,26 +1,28 @@
 # OpenQueue
 
-OpenQueue is an admin-only web app for managing doubles open play. It helps a
-single organizer add players, form standby groups, assign groups to compatible
-courts, start match timers, and track person-by-person results.
+OpenQueue is a public open play web app with an admin board and a player queue
+view. It helps a single organizer manage courts, add players through a table,
+form standby groups, assign groups to compatible courts, start match timers, and
+track person-by-person results.
 
 ## Features
 
-- Add one player or open a compact two-column bulk-add table for 35-40 players;
+- Add and edit players through a compact two-column table for 35-40 players;
   saved selections auto-fill level, paddle, and grip color.
 - Auto-fill level bandwidth defaults by player level. New players default to
   level 3 with a 2-3 accepted range; supported levels are 1-4.
 - Reuse saved player profiles, paddle options, and grip color options.
-- Configure the number of courts, each court name, court level range, max
-  minutes of play, and visible court status colors for ready, reserved,
-  unavailable, loaded, and playing.
+- Courts appear first on the admin board, followed by automatic assignment,
+  standby queue, and the editable player table.
+- Configure the number of courts, open play date, and max minutes from the admin
+  settings modal.
 - View four-player standby groups and the courts each group can play on.
 - Drag a group to a court or use automatic assignments for ready courts.
 - Remove an unavailable player from a loaded, not-yet-started court and
   automatically fill the slot with the next compatible standby player.
-- Switch to a player queue view so waiting players can see their queue position
-  and expected groupmates, while assigned/playing players are shown only under
-  currently loaded or playing courts.
+- Share `?view=player` so players can see queue position and expected groupmates
+  on their phones, while assigned/playing players are shown only under loaded or
+  playing courts.
 - Start a court timer, mark individual winners, and return players to the queue.
 - Save wins, losses, games played, and ranking score for the next open play.
 - Mark late, unavailable, or leaving players directly from the roster.
