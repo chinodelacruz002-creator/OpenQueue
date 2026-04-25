@@ -6,8 +6,8 @@ courts, start match timers, and track person-by-person results.
 
 ## Features
 
-- Add one player or paste multiple Excel-style rows with level, paddle, grip
-  color, and optional preferred partner.
+- Add one player or open a bulk-add table to type new players or select saved
+  players; saved selections auto-fill level, paddle, grip color, and partner.
 - Auto-fill level bandwidth defaults by player level. New players default to
   level 3 with a 2-3 accepted range; supported levels are 1-4.
 - Reuse saved player profiles, paddle options, and grip color options.
