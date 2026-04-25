@@ -453,32 +453,10 @@ export default function App() {
       seenInForm.add(key);
     }
 
-    const waitingNames = new Set(
-      players
-        .filter((player) => player.arrivalStatus === 'present')
-        .map((player) => normalizePlayerName(player.name)),
-    );
+    const existingNames = new Set(players.map((player) => normalizePlayerName(player.name)));
     for (const row of namedRows) {
-      if (waitingNames.has(normalizePlayerName(row.name))) {
-        setBulkAddError(
-          `Already in the waiting queue: ${row.name.trim()}. You cannot add the same person twice.`,
-        );
-        return;
-      }
-    }
-
-    const onCourt = new Set(
-      players
-        .filter(
-          (player) => player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing',
-        )
-        .map((player) => normalizePlayerName(player.name)),
-    );
-    for (const row of namedRows) {
-      if (onCourt.has(normalizePlayerName(row.name))) {
-        setBulkAddError(
-          `This person is already on a court: ${row.name.trim()}. Finish or reset the match first.`,
-        );
+      if (existingNames.has(normalizePlayerName(row.name))) {
+        setBulkAddError(`Already added: ${row.name.trim()}. You cannot add the same name twice.`);
         return;
       }
     }
@@ -909,7 +887,7 @@ export default function App() {
                         />
                       </td>
                       <td>
-                        <span className="bulk-status">Ready</span>
+                        {row.name.trim() ? <span className="bulk-status">Ready</span> : null}
                       </td>
                       <td>
                         <button
