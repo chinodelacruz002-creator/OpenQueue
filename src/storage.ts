@@ -17,11 +17,17 @@ interface PlayerRow {
   ranking_score: number;
 }
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const supabaseUrl =
+  import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.VITE_NEXT_PUBLIC_SUPABASE_URL;
+const supabasePublishableKey =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
+  import.meta.env.VITE_SUPABASE_ANON_KEY ??
+  import.meta.env.VITE_NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 const supabase =
-  supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+  supabaseUrl && supabasePublishableKey
+    ? createClient(supabaseUrl, supabasePublishableKey)
+    : null;
 
 export const hasSupabaseConfig = Boolean(supabase);
 

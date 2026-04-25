@@ -127,6 +127,12 @@ button {
   border-radius: 1rem;
 }
 
+.public-card strong,
+.public-card span,
+.public-card small {
+  overflow-wrap: anywhere;
+}
+
 .public-card span,
 .public-card small {
   color: #66788a;
@@ -557,13 +563,112 @@ select {
 }
 
 @media (max-width: 560px) {
+  body {
+    background: #f4f8fb;
+  }
+
   .hero,
-  .layout {
+  .layout,
+  .player-view {
     padding: 1rem;
   }
 
+  .hero {
+    gap: 1rem;
+  }
+
+  .hero h1 {
+    font-size: 2.4rem;
+  }
+
+  .hero p {
+    font-size: 0.95rem;
+  }
+
+  .hero-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .hero-stats div {
+    min-width: 0;
+    padding: 0.7rem;
+    border-radius: 0.85rem;
+  }
+
+  .hero-stats strong {
+    font-size: 1.35rem;
+  }
+
+  .hero-stats span {
+    font-size: 0.68rem;
+  }
+
+  .view-toggle {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0.75rem 1rem;
+    background: rgba(244, 248, 251, 0.94);
+    backdrop-filter: blur(0.5rem);
+  }
+
+  .view-toggle button {
+    min-height: 3rem;
+    padding: 0.65rem;
+    font-size: 0.86rem;
+  }
+
+  .player-view {
+    gap: 0.75rem;
+  }
+
+  .panel {
+    padding: 0.85rem;
+    border-radius: 1rem;
+  }
+
+  .panel-title {
+    gap: 0.45rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .panel-title h2 {
+    font-size: 1.05rem;
+  }
+
+  .public-list {
+    gap: 0.6rem;
+  }
+
+  .public-card {
+    gap: 0.45rem;
+    padding: 0.85rem;
+    border-radius: 0.9rem;
+    box-shadow: 0 0.5rem 1.25rem rgba(25, 55, 82, 0.06);
+  }
+
+  .public-card strong {
+    font-size: 1rem;
+    line-height: 1.25;
+  }
+
+  .public-card span,
+  .public-card small {
+    font-size: 0.86rem;
+    line-height: 1.35;
+  }
+
   .form-grid,
-  .level-settings {
+  .level-settings,
+  .match-player-grid,
+  .player-stack {
     grid-template-columns: 1fr;
+  }
+
+  .court-public-card {
+    border-left: 0.35rem solid #34d399;
   }
 }

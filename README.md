@@ -45,12 +45,23 @@ create table players (
 );
 ```
 
-Then set these environment variables:
+Then set these environment variables. For Vite, use the `VITE_` names:
 
 ```bash
 VITE_SUPABASE_URL=your-project-url
-VITE_SUPABASE_ANON_KEY=your-anon-key
+VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
+
+The app also accepts `NEXT_PUBLIC_SUPABASE_URL` and
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` as aliases, so the values copied from
+Supabase's Next.js setup guide can be reused. The `@supabase/ssr` package and
+middleware files from that guide are only needed for Next.js apps; OpenQueue is
+a Vite app and uses the browser Supabase client.
+
+For GitHub Pages, add these repository secrets before deploying:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
 
 ## Getting Started
 
