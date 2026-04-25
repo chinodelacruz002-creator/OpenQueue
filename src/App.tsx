@@ -230,9 +230,9 @@ export default function App() {
     setPaddleOptions(mergeOptions(PADDLE_OPTIONS, appData.savedPaddles ?? []));
     setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, appData.savedGripColors ?? []));
     if (kind === 'initial') {
-      setSaveStatus(hasSupabaseConfig ? 'Loaded from Supabase' : 'Loaded from this browser');
+      setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
     } else {
-      setSaveStatus(hasSupabaseConfig ? 'Synced from Supabase' : 'Synced locally');
+      setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
     }
   }, []);
 
@@ -301,7 +301,7 @@ export default function App() {
       };
 
       saveOpenPlayData(data)
-        .then(() => setSaveStatus(hasSupabaseConfig ? 'Saved to Supabase' : 'Saved locally'))
+        .then(() => setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)'))
         .catch(() => setSaveStatus('Save failed'));
     }, SAVE_DEBOUNCE_MS);
 
@@ -312,6 +312,8 @@ export default function App() {
     () => getAvailablePlayers(players),
     [players],
   );
+
+  const waitingPlayers = availablePlayers;
 
   const queueGroups = useMemo(
     () => createGroupsFromAvailablePlayers(availablePlayers, courts),
@@ -363,9 +365,7 @@ export default function App() {
   );
 
   const bulkRowsPerColumn = Math.ceil(bulkRows.length / 2);
-  const bulkColumnRows = splitRowsIntoColumns(bulkRows).filter(
-    (columnRows) => columnRows.length > 0,
-  );
+  const bulkColumnRows = splitRowsIntoColumns(bulkRows);
 
   const updateKnownOptions = (addedPlayers: Player[]) => {
     setPaddleOptions((currentOptions) =>
@@ -424,10 +424,6 @@ export default function App() {
 
   const updateBulkLevel = (rowId: string, level: number) => {
     updateBulkRow(rowId, { level, ...getLevelRange(level) });
-  };
-
-  const addBulkRow = () => {
-    setBulkRows((currentRows) => [...currentRows, createBulkRow()]);
   };
 
   const resetBulkRows = () => {
@@ -791,7 +787,7 @@ export default function App() {
   const renderBulkModal = () => (
     <div className="modal-backdrop" role="presentation">
       <section className="bulk-modal" aria-labelledby="bulk-add-title" role="dialog">
-        <div className="modal-header">
+        <div className="modal-header bulk-modal-header">
           <div>
             <h2 id="bulk-add-title">Bulk Add Players</h2>
             <p>
@@ -799,18 +795,32 @@ export default function App() {
               players auto-fill paddle, level, and grip color.
             </p>
           </div>
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => {
-              setBulkAddError('');
-              setIsBulkModalOpen(false);
-            }}
-          >
-            <X size={18} />
-            Close
-          </button>
+          <div className="bulk-modal-header-actions">
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={resetBulkRows}
+            >
+              Reset rows
+            </button>
+            <button className="primary-button" type="button" onClick={handleBulkAdd}>
+              Add players
+            </button>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => {
+                setBulkAddError('');
+                setIsBulkModalOpen(false);
+              }}
+            >
+              <X size={18} />
+              Close
+            </button>
+          </div>
         </div>
+
+        {bulkAddError ? <p className="bulk-error" role="alert">{bulkAddError}</p> : null}
 
         <div className="bulk-table-groups">
           {bulkColumnRows.map((columnRows, columnIndex) => (
@@ -939,20 +949,6 @@ export default function App() {
             ))}
           </datalist>
         </div>
-
-        {bulkAddError ? <p className="bulk-error" role="alert">{bulkAddError}</p> : null}
-        <div className="bulk-actions">
-          <button className="ghost-button" type="button" onClick={addBulkRow}>
-            <Plus size={18} />
-            Add row
-          </button>
-          <button className="ghost-button" type="button" onClick={resetBulkRows}>
-            Reset rows
-          </button>
-          <button className="primary-button" type="button" onClick={handleBulkAdd}>
-            Add players
-          </button>
-        </div>
       </section>
     </div>
   );
@@ -1055,7 +1051,8 @@ export default function App() {
         <div className="public-list">
           {courts.map((court) => {
             const elapsedSeconds = getElapsedSeconds(court.match, now);
-            const playerNames = court.match?.players.map((player) => player.name).join(', ');
+            const topNames = court.match?.players.slice(0, 2).map((player) => player.name).join(', ');
+            const bottomNames = court.match?.players.slice(2, 4).map((player) => player.name).join(', ');
             const emptyCourtLabel =
               court.status === 'reserved' || court.status === 'unavailable'
                 ? court.status
@@ -1064,7 +1061,18 @@ export default function App() {
             return (
               <article className={`public-card court-public-card ${court.status}`} key={court.id}>
                 <strong>{court.name}</strong>
-                <span>{playerNames || emptyCourtLabel}</span>
+                {court.match ? (
+                  <div className="public-court-teams">
+                    <span>
+                      Top: {topNames || '—'}
+                    </span>
+                    <span>
+                      Bottom: {bottomNames || '—'}
+                    </span>
+                  </div>
+                ) : (
+                  <span>{emptyCourtLabel}</span>
+                )}
                 <small>
                   Levels {court.minLevel}-{court.maxLevel} · {court.status}
                   {court.match?.startedAt ? ` · ${formatElapsedTime(elapsedSeconds)}` : ''}
@@ -1212,7 +1220,7 @@ export default function App() {
           <section className="admin-actions panel">
             <div>
               <strong>Open Play for {sessionDate}</strong>
-              <span>{saveStatus}</span>
+              <span className="save-status-muted">{saveStatus}</span>
             </div>
             <div className="inline-actions">
               <button
@@ -1325,53 +1333,61 @@ export default function App() {
                   </div>
 
                   {court.match ? (
-                    <div className="match-card">
+                    <div className="match-card court-surface">
+                      <span className="kitchen-line top" aria-hidden="true" />
+                      <span className="kitchen-line bottom" aria-hidden="true" />
                       <div className={`timer ${isOverTime ? 'overtime' : ''}`}>
                         <Clock3 size={18} />
                         {formatElapsedTime(elapsedSeconds)} /{' '}
                         {court.match.durationMinutes}:00
                       </div>
-                      <div className="match-player-grid">
-                        {court.match.players.map((player) => {
-                          const isWinner = court.match?.winnerIds.includes(player.id);
-                          const canSubstitute = court.status === 'loaded';
+                      <div className="match-teams">
+                        {[court.match.players.slice(0, 2), court.match.players.slice(2, 4)].map(
+                          (team, teamIndex) => (
+                            <div className="team-row" key={`team-${teamIndex}`}>
+                              {team.map((player) => {
+                                const isWinner = court.match?.winnerIds.includes(player.id);
+                                const canSubstitute = court.status === 'loaded';
 
-                          return (
-                            <div
-                              className={`match-player-card ${isWinner ? 'winner' : ''}`}
-                              key={player.id}
-                            >
-                              <button
-                                className="match-result-button"
-                                disabled={court.status !== 'playing'}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  toggleMatchWinner(court.id, player.id);
-                                }}
-                              >
-                                <strong>{player.name}</strong>
-                                <span>
-                                  {court.status === 'playing'
-                                    ? isWinner
-                                      ? 'Winner'
-                                      : 'Tap if won'
-                                    : 'Loaded'}
-                                </span>
-                              </button>
-                              {canSubstitute && (
-                                <button
-                                  className="substitute-button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    removeLoadedPlayer(court.id, player.id);
-                                  }}
-                                >
-                                  Remove + fill
-                                </button>
-                              )}
+                                return (
+                                  <div
+                                    className={`match-player-card ${isWinner ? 'winner' : ''}`}
+                                    key={player.id}
+                                  >
+                                    <button
+                                      className="match-result-button"
+                                      disabled={court.status !== 'playing'}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        toggleMatchWinner(court.id, player.id);
+                                      }}
+                                    >
+                                      <strong>{player.name}</strong>
+                                      <span>
+                                        {court.status === 'playing'
+                                          ? isWinner
+                                            ? 'Winner'
+                                            : 'Tap if won'
+                                          : 'Loaded'}
+                                      </span>
+                                    </button>
+                                    {canSubstitute && (
+                                      <button
+                                        className="substitute-button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          removeLoadedPlayer(court.id, player.id);
+                                        }}
+                                      >
+                                        Remove + fill
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
+                          ),
+                        )}
                       </div>
                       <div className="court-actions">
                         {court.status !== 'playing' && (
@@ -1460,6 +1476,13 @@ export default function App() {
               four-player group to a court, or use a suggested assignment.
             </p>
 
+            {waitingPlayers.length > 0 && waitingPlayers.length < 4 && (
+              <p className="hint">
+                Waiting players: {waitingPlayers.length}. Need at least 4 waiting players to form a
+                standby group.
+              </p>
+            )}
+
             <div className="queue-grid">
               {queueGroups.map((group) => {
                 const canUseSelectedCourt =
@@ -1527,7 +1550,20 @@ export default function App() {
               })}
 
               {!queueGroups.length && (
-                <div className="empty-state">Add at least four available players.</div>
+                <div className="empty-state">
+                  {waitingPlayers.length < 4
+                    ? 'Add at least four waiting players to form the first group.'
+                    : 'No groups can be formed right now.'}
+                  {waitingPlayers.length > 0 && waitingPlayers.length < 4 ? (
+                    <div className="waiting-preview">
+                      {waitingPlayers.map((player) => (
+                        <span className="waiting-chip" key={player.id}>
+                          {player.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
           </section>
