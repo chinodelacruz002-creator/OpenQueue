@@ -108,6 +108,8 @@ export interface OpenPlaySession {
 export interface AppData {
   sessionDate: string;
   players: Player[];
+  courts: Court[];
+  maxMinutes: number;
   savedPlayers: SavedPlayer[];
   savedPaddles: string[];
   savedGripColors: string[];

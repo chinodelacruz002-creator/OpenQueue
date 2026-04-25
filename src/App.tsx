@@ -89,6 +89,8 @@ const createInitialCourts = (): Court[] =>
 const createAppData = (): AppData => ({
   sessionDate: todayKey(),
   players: [],
+  courts: createInitialCourts(),
+  maxMinutes: DEFAULT_MAX_MINUTES,
   savedPlayers: [],
   savedPaddles: PADDLE_OPTIONS,
   savedGripColors: GRIP_COLOR_OPTIONS,
@@ -225,22 +227,48 @@ export default function App() {
       const appData = data ?? createAppData();
       setSessionDate(appData.sessionDate || todayKey());
       setPlayers(appData.players ?? []);
+      setCourts(appData.courts?.length ? appData.courts : createInitialCourts());
+      setMaxMinutes(appData.maxMinutes ?? DEFAULT_MAX_MINUTES);
       setSavedPlayers(appData.savedPlayers ?? []);
       setPaddleOptions(mergeOptions(PADDLE_OPTIONS, appData.savedPaddles ?? []));
       setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, appData.savedGripColors ?? []));
       setSaveStatus(hasSupabaseConfig ? 'Loaded from Supabase' : 'Loaded from this browser');
     });
 
+    const refreshTimer = window.setInterval(() => {
+      if (viewMode !== 'player') {
+        return;
+      }
+
+      loadOpenPlayData().then((data) => {
+        if (!mounted || !data) {
+          return;
+        }
+
+        setSessionDate(data.sessionDate || todayKey());
+        setPlayers(data.players ?? []);
+        setCourts(data.courts ?? createInitialCourts());
+        setMaxMinutes(data.maxMinutes ?? DEFAULT_MAX_MINUTES);
+        setSavedPlayers(data.savedPlayers ?? []);
+        setPaddleOptions(mergeOptions(PADDLE_OPTIONS, data.savedPaddles ?? []));
+        setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, data.savedGripColors ?? []));
+        setSaveStatus(hasSupabaseConfig ? 'Synced from Supabase' : 'Synced locally');
+      });
+    }, 5000);
+
     return () => {
       mounted = false;
+      window.clearInterval(refreshTimer);
     };
-  }, []);
+  }, [viewMode]);
 
   useEffect(() => {
     const saveTimer = window.setTimeout(() => {
       const data: AppData = {
         sessionDate,
         players,
+        courts,
+        maxMinutes,
         savedPlayers,
         savedPaddles: paddleOptions,
         savedGripColors: gripColorOptions,
@@ -252,7 +280,7 @@ export default function App() {
     }, SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(saveTimer);
-  }, [gripColorOptions, paddleOptions, players, savedPlayers, sessionDate]);
+  }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, savedPlayers, sessionDate]);
 
   const availablePlayers = useMemo(
     () => getAvailablePlayers(players),

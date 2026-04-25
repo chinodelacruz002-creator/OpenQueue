@@ -27,8 +27,11 @@ courts, start match timers, and track person-by-person results.
 
 ## Supabase Persistence
 
-The app works with browser local storage by default. To save reusable player
-profiles in Supabase, create a `players` table with these columns:
+The app uses Supabase as the public shared state when configured, so the admin
+page and player phones see the same live queue and courts. Browser local storage
+is only a fallback for local development without Supabase env variables.
+
+Create the reusable player profile table:
 
 ```sql
 create table players (
@@ -45,6 +48,37 @@ create table players (
   games_played integer not null default 0,
   ranking_score integer not null default 0
 );
+```
+
+Create the live open play state table:
+
+```sql
+create table open_play_state (
+  id text primary key,
+  session_date date not null,
+  players jsonb not null default '[]'::jsonb,
+  courts jsonb not null default '[]'::jsonb,
+  max_minutes integer not null default 15,
+  saved_paddles text[] not null default '{}',
+  saved_grip_colors text[] not null default '{}',
+  updated_at timestamptz not null default now()
+);
+```
+
+For a public no-login deployment, enable Row Level Security and add public
+read/write policies for both tables:
+
+```sql
+alter table players enable row level security;
+alter table open_play_state enable row level security;
+
+create policy "Public read players" on players for select using (true);
+create policy "Public write players" on players for insert with check (true);
+create policy "Public update players" on players for update using (true);
+
+create policy "Public read open play state" on open_play_state for select using (true);
+create policy "Public write open play state" on open_play_state for insert with check (true);
+create policy "Public update open play state" on open_play_state for update using (true);
 ```
 
 Then set these environment variables. For Vite, use the `VITE_` names:
