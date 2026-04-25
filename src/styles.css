@@ -844,6 +844,21 @@ select {
   font-weight: 900;
 }
 
+.bulk-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.55rem;
+  color: #065f46;
+  background: #dcfce7;
+  border: 1px solid #34d399;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .settings-grid {
   display: grid;
   gap: 0.85rem;

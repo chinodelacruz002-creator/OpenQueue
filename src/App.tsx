@@ -804,7 +804,7 @@ export default function App() {
               Reset rows
             </button>
             <button className="primary-button" type="button" onClick={handleBulkAdd}>
-              Manage players
+              Update players
             </button>
             <button
               className="ghost-button"
@@ -834,7 +834,7 @@ export default function App() {
                     <th>Min</th>
                     <th>Max</th>
                     <th>Paddle</th>
-                    <th>Grip</th>
+                    <th>Status</th>
                     <th />
                   </tr>
                 </thead>
@@ -909,14 +909,7 @@ export default function App() {
                         />
                       </td>
                       <td>
-                        <input
-                          list="grip-color-options"
-                          value={row.gripColor}
-                          onChange={(event) =>
-                            updateBulkRow(row.rowId, { gripColor: event.target.value })
-                          }
-                          placeholder="Color"
-                        />
+                        <span className="bulk-status">Ready</span>
                       </td>
                       <td>
                         <button
