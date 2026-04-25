@@ -4,19 +4,34 @@ const GROUP_SIZE = 4;
 
 export const getAvailablePlayers = (players: Player[]): Player[] =>
   players
-    .filter((player) => player.arrivalStatus === 'present')
-    .sort(comparePlayersByPriority);
+    .filter((player) => player.arrivalStatus === 'present');
 
 export const createGroupsFromAvailablePlayers = (
   players: Player[],
   courts: Court[],
 ): QueueGroup[] => {
-  const unusedPlayers = [...players];
+  const neutral: Player[] = [];
+  const winners: Player[] = [];
+  const losers: Player[] = [];
+
+  for (const player of players) {
+    if (player.gamesPlayed === 0 || player.lastResult === null) {
+      neutral.push(player);
+      continue;
+    }
+    if (player.lastResult === 'won') {
+      winners.push(player);
+      continue;
+    }
+    losers.push(player);
+  }
+
+  const ordered = [...neutral, ...winners, ...losers];
+  const unusedPlayers = [...ordered];
   const groups: QueueGroup[] = [];
 
   while (unusedPlayers.length >= GROUP_SIZE) {
     const anchor = unusedPlayers.shift();
-
     if (!anchor) {
       break;
     }
@@ -26,7 +41,6 @@ export const createGroupsFromAvailablePlayers = (
 
     while (groupPlayers.length < GROUP_SIZE && unusedPlayers.length > 0) {
       const nextPlayer = unusedPlayers.shift();
-
       if (nextPlayer) {
         groupPlayers.push(nextPlayer);
       }
@@ -37,7 +51,7 @@ export const createGroupsFromAvailablePlayers = (
     }
   }
 
-  return groups.sort((first, second) => second.priorityScore - first.priorityScore);
+  return groups;
 };
 
 export const buildAutoAssignments = (
@@ -80,18 +94,6 @@ export const formatElapsedTime = (seconds: number): string => {
   const remainingSeconds = seconds % 60;
 
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-};
-
-const comparePlayersByPriority = (first: Player, second: Player): number => {
-  const secondScore = second.waitScore + second.rankingScore + second.wins * 3 - second.losses;
-  const firstScore = first.waitScore + first.rankingScore + first.wins * 3 - first.losses;
-  const scoreDifference = secondScore - firstScore;
-
-  if (scoreDifference !== 0) {
-    return scoreDifference;
-  }
-
-  return first.name.localeCompare(second.name);
 };
 
 const takePreferredPartner = (
@@ -143,7 +145,4 @@ const createQueueGroup = (players: Player[], courts: Court[]): QueueGroup => {
 const getAverageLevel = (players: Player[]): number =>
   players.reduce((sum, player) => sum + player.level, 0) / players.length;
 
-const isGroupCompatibleWithCourt = (players: Player[], court: Court): boolean =>
-  players.every(
-    (player) => player.maxLevel >= court.minLevel && player.minLevel <= court.maxLevel,
-  );
+const isGroupCompatibleWithCourt = (_players: Player[], _court: Court): boolean => true;

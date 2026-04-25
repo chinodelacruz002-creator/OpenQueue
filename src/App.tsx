@@ -196,8 +196,7 @@ const upsertSavedPlayer = (
 
 const getPlayerIdsInMatch = (match: Match) => match.players.map((player) => player.id);
 
-const isPlayerCompatibleWithCourt = (player: Player, court: Court): boolean =>
-  player.maxLevel >= court.minLevel && player.minLevel <= court.maxLevel;
+const isPlayerCompatibleWithCourt = (_player: Player, _court: Court): boolean => true;
 
 const replacePlayerInMatch = (
   match: Match,
@@ -380,9 +379,29 @@ export default function App() {
 
   const nextGroups = useMemo(() => queueGroups.slice(0, 2), [queueGroups]);
   const nextGroupedIds = useMemo(() => new Set(nextGroups.flatMap((group) => group.playerIds)), [nextGroups]);
+  const fifoQueueOrder = useMemo(() => {
+    const neutral: Player[] = [];
+    const winners: Player[] = [];
+    const losers: Player[] = [];
+
+    for (const player of waitingPlayers) {
+      if (player.gamesPlayed === 0 || player.lastResult === null) {
+        neutral.push(player);
+        continue;
+      }
+      if (player.lastResult === 'won') {
+        winners.push(player);
+        continue;
+      }
+      losers.push(player);
+    }
+
+    return [...neutral, ...winners, ...losers];
+  }, [waitingPlayers]);
+
   const upNextPlayers = useMemo(
-    () => waitingPlayers.filter((player) => !nextGroupedIds.has(player.id)),
-    [nextGroupedIds, waitingPlayers],
+    () => fifoQueueOrder.filter((player) => !nextGroupedIds.has(player.id)),
+    [fifoQueueOrder, nextGroupedIds],
   );
 
   const selectedCourt = courts.find((court) => court.id === selectedCourtId);
@@ -513,19 +532,33 @@ export default function App() {
     }
     setBulkAddError('');
 
-    const namedRows = bulkRows.filter((row) => row.name.trim());
+    const rawNamedRows = bulkRows.filter((row) => row.name.trim());
+    const uniqueRows: BulkPlayerRow[] = [];
     const seenInForm = new Set<string>();
+    const duplicateInForm: string[] = [];
 
-    for (const row of namedRows) {
+    for (const row of rawNamedRows) {
       const key = normalizePlayerName(row.name);
       if (seenInForm.has(key)) {
-        setBulkAddError('Duplicate name in the form. Remove or fix duplicate rows.');
-        return;
+        duplicateInForm.push(row.name.trim());
+        continue;
       }
       seenInForm.add(key);
+      uniqueRows.push(row);
     }
 
-    const editedPlayers = namedRows.map((row) => {
+    const existingNames = new Set(players.map((player) => normalizePlayerName(player.name)));
+    const alreadyInRoster: string[] = [];
+    const rowsToApply = uniqueRows.filter((row) => {
+      const key = normalizePlayerName(row.name);
+      if (existingNames.has(key) && !row.playerId) {
+        alreadyInRoster.push(row.name.trim());
+        return false;
+      }
+      return true;
+    });
+
+    const editedPlayers = rowsToApply.map((row) => {
       const existing = row.playerId ? players.find((player) => player.id === row.playerId) : null;
       const savedPlayer = savedPlayers.find((player) => player.id === row.savedPlayerId);
 
@@ -563,18 +596,37 @@ export default function App() {
       } satisfies Player;
     });
 
-    const existingNames = new Map(
+    const existingIdToName = new Map(
       players.map((player) => [player.id, normalizePlayerName(player.name)] as const),
     );
 
     for (const player of editedPlayers) {
-      const otherName = Array.from(existingNames.entries()).find(
+      const otherName = Array.from(existingIdToName.entries()).find(
         ([id, name]) => id !== player.id && name === normalizePlayerName(player.name),
       );
       if (otherName) {
         setBulkAddError(`Duplicate name: ${player.name}. Each player name must be unique.`);
         return;
       }
+    }
+
+    if (duplicateInForm.length || alreadyInRoster.length) {
+      const parts: string[] = [];
+      if (duplicateInForm.length) {
+        parts.push(
+          `Ignored duplicate rows: ${Array.from(new Set(duplicateInForm))
+            .slice(0, 6)
+            .join(', ')}${duplicateInForm.length > 6 ? '…' : ''}.`,
+        );
+      }
+      if (alreadyInRoster.length) {
+        parts.push(
+          `Already added (skipped): ${Array.from(new Set(alreadyInRoster))
+            .slice(0, 6)
+            .join(', ')}${alreadyInRoster.length > 6 ? '…' : ''}.`,
+        );
+      }
+      setBulkAddError(parts.join(' '));
     }
 
     setPlayers(editedPlayers);
@@ -747,30 +799,42 @@ export default function App() {
     const winnerIds = court.match.winnerIds;
 
     setPlayers((currentPlayers) => {
-      const updatedPlayers = currentPlayers.map((player) => {
+      const returningWinners: Player[] = [];
+      const returningLosers: Player[] = [];
+      const keptPlayers: Player[] = [];
+
+      for (const player of currentPlayers) {
         if (!matchPlayerIds.includes(player.id)) {
-          return player;
+          keptPlayers.push(player);
+          continue;
         }
 
         const isWinner = winnerIds.includes(player.id);
-        const updatedPlayer = {
+        const updatedPlayer: Player = {
           ...player,
-          arrivalStatus: 'present' as const,
+          arrivalStatus: 'present',
           wins: player.wins + (isWinner ? 1 : 0),
           losses: player.losses + (isWinner ? 0 : 1),
           gamesPlayed: player.gamesPlayed + 1,
           waitScore: player.waitScore + (isWinner ? 2 : 1),
           rankingScore: player.rankingScore + (isWinner ? 3 : 0),
-          lastResult: isWinner ? 'won' as const : 'lost' as const,
+          lastResult: isWinner ? 'won' : 'lost',
         };
 
         setSavedPlayers((currentSavedPlayers) =>
           upsertSavedPlayer(currentSavedPlayers, buildSavedPlayer(updatedPlayer)),
         );
-        return updatedPlayer;
-      });
 
-      return updatedPlayers;
+        if (isWinner) {
+          returningWinners.push(updatedPlayer);
+        } else {
+          returningLosers.push(updatedPlayer);
+        }
+      }
+
+      // FIFO fairness: returning players go behind anyone already waiting.
+      // Within the returning batch, winners are appended before losers so they stack together.
+      return [...keptPlayers, ...returningWinners, ...returningLosers];
     });
 
     updateCourt(courtId, { status: 'ready', match: null });
@@ -1116,7 +1180,7 @@ export default function App() {
                   </span>
                 ))}
               </span>
-              <small>These are the next full groups that will be sent to courts.</small>
+              <small>Neutral players first, then winners, then losers.</small>
             </article>
           ) : null}
 
@@ -1125,7 +1189,7 @@ export default function App() {
               <strong>
                 #{index + 1} {player.name}
               </strong>
-              <span>Priority order</span>
+              <span>In line (FIFO)</span>
               <small>{scoreLabel(player)}</small>
             </article>
           ))}
@@ -1167,7 +1231,7 @@ export default function App() {
                   <span>{emptyCourtLabel}</span>
                 )}
                 <small>
-                  Levels {court.minLevel}-{court.maxLevel} · {court.status}
+                  {court.status}
                   {court.match?.startedAt ? ` · ${formatElapsedTime(elapsedSeconds)}` : ''}
                 </small>
               </article>
@@ -1387,43 +1451,6 @@ export default function App() {
                       <option value="loaded">Loaded</option>
                       <option value="playing">Playing</option>
                     </select>
-                  </div>
-
-                  <div className="level-settings">
-                    <label>
-                      Min
-                      <select
-                        value={court.minLevel}
-                        onChange={(event) =>
-                          updateCourt(court.id, {
-                            minLevel: Number(event.target.value),
-                          })
-                        }
-                      >
-                        {LEVELS.map((level) => (
-                          <option value={level} key={level}>
-                            {level}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Max
-                      <select
-                        value={court.maxLevel}
-                        onChange={(event) =>
-                          updateCourt(court.id, {
-                            maxLevel: Number(event.target.value),
-                          })
-                        }
-                      >
-                        {LEVELS.map((level) => (
-                          <option value={level} key={level}>
-                            {level}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
                   </div>
 
                   {court.match ? (
