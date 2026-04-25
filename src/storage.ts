@@ -37,6 +37,8 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
     return loadLocalData();
   }
 
+  clearLocalData();
+
   const { data: playerRows, error: playerError } = await supabase
     .from('players')
     .select('*')
@@ -44,7 +46,7 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
     .order('name', { ascending: true });
 
   if (playerError) {
-    return loadLocalData();
+    return null;
   }
 
   const { data: stateRow, error: stateError } = await supabase
@@ -53,22 +55,19 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
     .eq('id', OPEN_PLAY_STATE_ID)
     .maybeSingle<OpenPlayStateRow>();
 
-  const localData = loadLocalData();
   const savedPlayers = playerRows.map(mapRowToSavedPlayer);
 
   if (stateError || !stateRow) {
     return {
-      sessionDate: localData?.sessionDate ?? getTodayKey(),
-      players: localData?.players ?? [],
-      courts: localData?.courts ?? [],
-      maxMinutes: localData?.maxMinutes ?? 15,
+      sessionDate: getTodayKey(),
+      players: [],
+      courts: [],
+      maxMinutes: 15,
       savedPlayers,
       savedPaddles: uniqueValues([
-        ...(localData?.savedPaddles ?? []),
         ...playerRows.map((row) => row.paddle),
       ]),
       savedGripColors: uniqueValues([
-        ...(localData?.savedGripColors ?? []),
         ...playerRows.map((row) => row.grip_color),
       ]),
     };
@@ -77,8 +76,8 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
   return {
     sessionDate: stateRow.session_date,
     players: stateRow.players ?? [],
-    courts: stateRow.courts?.length ? stateRow.courts : (localData?.courts ?? []),
-    maxMinutes: stateRow.max_minutes ?? localData?.maxMinutes ?? 15,
+    courts: stateRow.courts ?? [],
+    maxMinutes: stateRow.max_minutes ?? 15,
     savedPlayers,
     savedPaddles: uniqueValues([
       ...(stateRow.saved_paddles ?? []),
@@ -92,11 +91,12 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
 };
 
 export const saveOpenPlayData = async (data: AppData): Promise<void> => {
-  saveLocalData(data);
-
   if (!supabase) {
+    saveLocalData(data);
     return;
   }
+
+  clearLocalData();
 
   await Promise.all([
     supabase.from('players').upsert(data.savedPlayers.map(mapSavedPlayerToRow)),
@@ -129,6 +129,10 @@ const loadLocalData = (): AppData | null => {
 
 const saveLocalData = (data: AppData): void => {
   window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
+};
+
+const clearLocalData = (): void => {
+  window.localStorage.removeItem(LOCAL_STORAGE_KEY);
 };
 
 const mapRowToSavedPlayer = (row: PlayerRow): SavedPlayer => ({

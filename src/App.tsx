@@ -6,14 +6,12 @@ import {
   GripVertical,
   Plus,
   RotateCcw,
-  Save,
   Settings,
   Trophy,
-  UserRound,
   UsersRound,
   X,
 } from 'lucide-react';
-import { DragEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { DragEvent, useEffect, useMemo, useState } from 'react';
 import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
 import {
   buildAutoAssignments,
@@ -51,16 +49,6 @@ const splitRowsIntoColumns = (rows: BulkPlayerRow[]): BulkPlayerRow[][] => {
 };
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
-
-const createDefaultForm = (): PlayerForm => ({
-  name: '',
-  level: 3,
-  ...getLevelRange(3),
-  paddle: '',
-  gripColor: '',
-  preferredPartnerName: '',
-  arrivalStatus: 'present',
-});
 
 const createBulkRow = (): BulkPlayerRow => ({
   rowId: crypto.randomUUID(),
@@ -116,21 +104,6 @@ const buildPlayer = (form: PlayerForm, savedPlayer?: SavedPlayer): Player => ({
   lockedGroupId: null,
   rankingScore: savedPlayer?.rankingScore ?? 0,
 });
-
-const buildPlayerFromSaved = (savedPlayer: SavedPlayer): Player =>
-  buildPlayer(
-    {
-      name: savedPlayer.name,
-      level: savedPlayer.level,
-      minLevel: savedPlayer.minLevel,
-      maxLevel: savedPlayer.maxLevel,
-      paddle: savedPlayer.paddle,
-      gripColor: savedPlayer.gripColor,
-      preferredPartnerName: savedPlayer.preferredPartnerName,
-      arrivalStatus: 'present',
-    },
-    savedPlayer,
-  );
 
 const buildSavedPlayer = (player: Player): SavedPlayer => ({
   id: player.persistentId ?? player.id,
@@ -196,19 +169,23 @@ const replacePlayerInMatch = (
 });
 
 export default function App() {
+  const playerQueueUrl = `${window.location.pathname}?view=player`;
+  const initialViewMode = new URLSearchParams(window.location.search).get('view') === 'player'
+    ? 'player'
+    : 'admin';
   const [players, setPlayers] = useState<Player[]>([]);
   const [savedPlayers, setSavedPlayers] = useState<SavedPlayer[]>([]);
   const [paddleOptions, setPaddleOptions] = useState(PADDLE_OPTIONS);
   const [gripColorOptions, setGripColorOptions] = useState(GRIP_COLOR_OPTIONS);
   const [courts, setCourts] = useState<Court[]>(createInitialCourts);
-  const [form, setForm] = useState<PlayerForm>(createDefaultForm);
   const [bulkRows, setBulkRows] = useState<BulkPlayerRow[]>(createBulkRows());
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [maxMinutes, setMaxMinutes] = useState(DEFAULT_MAX_MINUTES);
   const [selectedCourtId, setSelectedCourtId] = useState('court-1');
   const [sessionDate, setSessionDate] = useState(todayKey);
   const [saveStatus, setSaveStatus] = useState('Loading saved players...');
-  const [viewMode, setViewMode] = useState<'admin' | 'player'>('admin');
+  const [viewMode, setViewMode] = useState<'admin' | 'player'>(initialViewMode);
   const [now, setNow] = useState(0);
 
   useEffect(() => {
@@ -299,11 +276,6 @@ export default function App() {
     [courts, queueGroups],
   );
 
-  const activePlayerNames = useMemo(
-    () => new Set(players.map((player) => player.name.toLowerCase())),
-    [players],
-  );
-
   const playerQueueRows = useMemo(
     () =>
       queueGroups.flatMap((group, groupIndex) =>
@@ -343,20 +315,6 @@ export default function App() {
       ),
     );
     updateKnownOptions(newPlayers);
-  };
-
-  const handlePlayerSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!form.name.trim()) {
-      return;
-    }
-
-    const matchingSavedPlayer = savedPlayers.find(
-      (player) => player.name.toLowerCase() === form.name.trim().toLowerCase(),
-    );
-    addPlayersToSession([buildPlayer(form, matchingSavedPlayer)]);
-    setForm(createDefaultForm());
   };
 
   const updateBulkRow = (
@@ -423,12 +381,12 @@ export default function App() {
     setIsBulkModalOpen(false);
   };
 
-  const addSavedPlayerToSession = (savedPlayer: SavedPlayer) => {
-    if (activePlayerNames.has(savedPlayer.name.toLowerCase())) {
-      return;
-    }
-
-    addPlayersToSession([buildPlayerFromSaved(savedPlayer)]);
+  const updatePlayer = (playerId: string, updates: Partial<Player>) => {
+    setPlayers((currentPlayers) =>
+      currentPlayers.map((player) =>
+        player.id === playerId ? { ...player, ...updates } : player,
+      ),
+    );
   };
 
   const updateCourtCount = (count: number) => {
@@ -472,20 +430,6 @@ export default function App() {
     return availablePlayers.find(
       (player) =>
         !currentPlayerIds.has(player.id) && isPlayerCompatibleWithCourt(player, court),
-    );
-  };
-
-  const togglePlayerAvailability = (playerId: string) => {
-    setPlayers((currentPlayers) =>
-      currentPlayers.map((player) =>
-        player.id === playerId
-          ? {
-              ...player,
-              arrivalStatus:
-                player.arrivalStatus === 'present' ? 'away' : 'present',
-            }
-          : player,
-      ),
     );
   };
 
@@ -730,18 +674,6 @@ export default function App() {
     );
   };
 
-  const updateFormLevel = (level: number) => {
-    setForm((currentForm) => ({
-      ...currentForm,
-      level,
-      ...getLevelRange(level),
-    }));
-  };
-
-  const updateFormNumber = (field: keyof PlayerForm, value: number) => {
-    setForm((currentForm) => ({ ...currentForm, [field]: value }));
-  };
-
   const renderBulkModal = () => (
     <div className="modal-backdrop" role="presentation">
       <section className="bulk-modal" aria-labelledby="bulk-add-title" role="dialog">
@@ -879,6 +811,16 @@ export default function App() {
               <option value={player.name} key={player.id} />
             ))}
           </datalist>
+          <datalist id="paddle-options">
+            {paddleOptions.map((option) => (
+              <option value={option} key={option} />
+            ))}
+          </datalist>
+          <datalist id="grip-color-options">
+            {gripColorOptions.map((option) => (
+              <option value={option} key={option} />
+            ))}
+          </datalist>
         </div>
 
         <div className="bulk-actions">
@@ -892,6 +834,61 @@ export default function App() {
           <button className="primary-button" type="button" onClick={handleBulkAdd}>
             Add players
           </button>
+        </div>
+      </section>
+    </div>
+  );
+
+  const renderSettingsModal = () => (
+    <div className="modal-backdrop" role="presentation">
+      <section className="settings-modal" aria-labelledby="settings-title" role="dialog">
+        <div className="modal-header">
+          <div>
+            <h2 id="settings-title">Admin Settings</h2>
+            <p>Configure the open play date, court count, and max play time.</p>
+          </div>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => setIsSettingsModalOpen(false)}
+          >
+            <X size={18} />
+            Close
+          </button>
+        </div>
+
+        <div className="settings-grid">
+          <label>
+            Open Play Date
+            <input
+              type="date"
+              value={sessionDate}
+              onChange={(event) => setSessionDate(event.target.value)}
+            />
+          </label>
+          <label>
+            Courts available
+            <input
+              min={1}
+              type="number"
+              value={courts.length}
+              onChange={(event) => updateCourtCount(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            Max minutes of play
+            <input
+              min={1}
+              type="number"
+              value={maxMinutes}
+              onChange={(event) => setMaxMinutes(Number(event.target.value))}
+            />
+          </label>
+        </div>
+
+        <div className="storage-status">
+          <Database size={16} />
+          <span>{saveStatus}</span>
         </div>
       </section>
     </div>
@@ -958,13 +955,14 @@ export default function App() {
   return (
     <main className="app-shell">
       {isBulkModalOpen && renderBulkModal()}
+      {isSettingsModalOpen && renderSettingsModal()}
       <section className="hero">
         <div>
-          <span className="eyebrow">Admin-only open play manager</span>
+          <span className="eyebrow">Admin open play manager</span>
           <h1>OpenQueue</h1>
           <p>
-            Open Play for {sessionDate}. Add players once, reuse saved profiles,
-            stack doubles groups, and score winners person by person.
+            Open Play for {sessionDate}. Courts first, then auto-assign, then the
+            waiting queue. Player view is shareable by link.
           </p>
         </div>
         <div className="hero-stats">
@@ -1001,295 +999,32 @@ export default function App() {
       {viewMode === 'player' ? (
         renderPlayerView()
       ) : (
-        <section className="layout">
-        <aside className="panel admin-panel">
-          <div className="panel-title">
-            <UserRound />
-            <h2>Add Player</h2>
-          </div>
-
-          <label>
-            Open Play Date
-            <input
-              type="date"
-              value={sessionDate}
-              onChange={(event) => setSessionDate(event.target.value)}
-            />
-          </label>
-          <p className="hint lock-note">
-            This locks the screen to one open play session date. Saved player
-            profiles stay reusable for future dates.
-          </p>
-
-          <form onSubmit={handlePlayerSubmit} className="player-form">
-            <label>
-              Player name
-              <input
-                list="saved-player-names"
-                value={form.name}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
-                placeholder="Jane Smith"
-              />
-            </label>
-            <datalist id="saved-player-names">
-              {savedPlayers.map((player) => (
-                <option value={player.name} key={player.id} />
-              ))}
-            </datalist>
-
-            <div className="form-grid">
-              <label>
-                Level
-                <select
-                  value={form.level}
-                  onChange={(event) => updateFormLevel(Number(event.target.value))}
-                >
-                  {LEVELS.map((level) => (
-                    <option value={level} key={level}>
-                      {level}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Paddle
-                <input
-                  list="paddle-options"
-                  value={form.paddle}
-                  onChange={(event) => setForm({ ...form, paddle: event.target.value })}
-                  placeholder="Selkirk Boomstik"
-                />
-              </label>
+        <section className="admin-board">
+          <section className="admin-actions panel">
+            <div>
+              <strong>Open Play for {sessionDate}</strong>
+              <span>{saveStatus}</span>
             </div>
-            <datalist id="paddle-options">
-              {paddleOptions.map((option) => (
-                <option value={option} key={option} />
-              ))}
-            </datalist>
-
-            <div className="form-grid">
-              <label>
-                Min level
-                <select
-                  value={form.minLevel}
-                  onChange={(event) =>
-                    updateFormNumber('minLevel', Number(event.target.value))
-                  }
-                >
-                  {LEVELS.map((level) => (
-                    <option value={level} key={level}>
-                      {level}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Max level
-                <select
-                  value={form.maxLevel}
-                  onChange={(event) =>
-                    updateFormNumber('maxLevel', Number(event.target.value))
-                  }
-                >
-                  {LEVELS.map((level) => (
-                    <option value={level} key={level}>
-                      {level}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <label>
-              Grip color
-              <input
-                list="grip-color-options"
-                value={form.gripColor}
-                onChange={(event) => setForm({ ...form, gripColor: event.target.value })}
-                placeholder="Blue"
-              />
-            </label>
-            <datalist id="grip-color-options">
-              {gripColorOptions.map((option) => (
-                <option value={option} key={option} />
-              ))}
-            </datalist>
-
-            <label>
-              Preferred partner
-              <input
-                value={form.preferredPartnerName}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    preferredPartnerName: event.target.value,
-                  })
-                }
-                placeholder="Optional"
-              />
-            </label>
-            <button className="primary-button" type="submit">
-              <Plus size={18} />
-              Add to queue
-            </button>
-          </form>
-
-          <div className="panel-title compact">
-            <UsersRound />
-            <h2>Bulk Add</h2>
-          </div>
-          <p className="hint">
-            Open a table to type new players or select saved players. Saved players
-            auto-fill paddle, grip color, and level settings.
-          </p>
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={() => setIsBulkModalOpen(true)}
-          >
-            <Plus size={18} />
-            Open bulk add table
-          </button>
-
-          <div className="panel-title compact">
-            <Settings />
-            <h2>Admin Settings</h2>
-          </div>
-          <label>
-            Courts available
-            <input
-              min={1}
-              type="number"
-              value={courts.length}
-              onChange={(event) => updateCourtCount(Number(event.target.value))}
-            />
-          </label>
-          <label>
-            Max minutes of play
-            <input
-              min={1}
-              type="number"
-              value={maxMinutes}
-              onChange={(event) => setMaxMinutes(Number(event.target.value))}
-            />
-          </label>
-
-          <div className="storage-status">
-            <Database size={16} />
-            <span>{saveStatus}</span>
-          </div>
-        </aside>
-
-        <section className="main-board">
-          <section
-            className="panel queue-panel"
-            onDrop={handleQueueDrop}
-            onDragOver={(event) => event.preventDefault()}
-          >
-            <div className="panel-title">
-              <UsersRound />
-              <h2>Standby Queue</h2>
-            </div>
-            <p className="hint">
-              Winners receive a higher wait priority when they return. Drag a
-              four-player group to a court, or use a suggested assignment.
-            </p>
-
-            <div className="queue-grid">
-              {queueGroups.map((group) => {
-                const canUseSelectedCourt =
-                  Boolean(selectedCourt) &&
-                  group.compatibleCourtIds.includes(selectedCourtId);
-
-                return (
-                  <article
-                    className={groupClassName(canUseSelectedCourt)}
-                    draggable
-                    key={group.id}
-                    onDragStart={(event) =>
-                      handleDragStart(event, {
-                        type: 'group',
-                        groupId: group.id,
-                        playerIds: group.playerIds,
-                      })
-                    }
-                  >
-                    <div className="queue-card-header">
-                      <span>
-                        <GripVertical size={16} />
-                        Group of 4
-                      </span>
-                      <small>Avg L{group.averageLevel.toFixed(1)}</small>
-                    </div>
-                    <div className="player-stack">
-                      {group.players.map((player) => (
-                        <div
-                          className="player-chip"
-                          draggable
-                          key={player.id}
-                          onDragStart={(event) =>
-                            handleDragStart(event, {
-                              type: 'player',
-                              playerId: player.id,
-                            })
-                          }
-                        >
-                          <span>
-                            {player.name}
-                            <small>{scoreLabel(player)}</small>
-                          </span>
-                          <span
-                            className="color-dot"
-                            style={{
-                              background: player.gripColor || '#94a3b8',
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="compatibility-list">
-                      Can play:{' '}
-                      {group.compatibleCourtIds.length
-                        ? group.compatibleCourtIds
-                            .map((courtId) =>
-                              courts.find((court) => court.id === courtId)?.name,
-                            )
-                            .join(', ')
-                        : 'No court fits'}
-                    </div>
-                  </article>
-                );
-              })}
-
-              {!queueGroups.length && (
-                <div className="empty-state">Add at least four available players.</div>
-              )}
-            </div>
-          </section>
-
-          <section className="panel suggestions-panel">
-            <div className="panel-title">
-              <ArrowDownUp />
-              <h2>Automatic Assignments</h2>
-            </div>
-            <div className="suggestion-list">
-              {autoAssignments.map((assignment) => (
-                <button
-                  className="suggestion-card"
-                  key={`${assignment.court.id}-${assignment.group.id}`}
-                  onClick={() => autoAssignGroup(assignment)}
-                >
-                  <strong>{assignment.court.name}</strong>
-                  <span>
-                    {assignment.group.players
-                      .map((player) => `${player.name} (L${player.level})`)
-                      .join(', ')}
-                  </span>
-                </button>
-              ))}
-              {!autoAssignments.length && (
-                <p className="hint">No ready court currently matches a full group.</p>
-              )}
+            <div className="inline-actions">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => setIsBulkModalOpen(true)}
+              >
+                <Plus size={18} />
+                Add / edit players
+              </button>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setIsSettingsModalOpen(true)}
+              >
+                <Settings size={18} />
+                Settings
+              </button>
+              <a className="ghost-button" href={playerQueueUrl} target="_blank" rel="noreferrer">
+                Player queue link
+              </a>
             </div>
           </section>
 
@@ -1472,75 +1207,245 @@ export default function App() {
               );
             })}
           </section>
-        </section>
 
-        <aside className="panel roster-panel">
-          <div className="panel-title">
-            <UsersRound />
-            <h2>Roster</h2>
-          </div>
-          <div className="roster-list">
-            {players.map((player) => (
-              <article className="roster-card" key={player.id}>
-                <div>
-                  <strong>{player.name}</strong>
+          <section className="panel suggestions-panel">
+            <div className="panel-title">
+              <ArrowDownUp />
+              <h2>Automatic Assignments</h2>
+            </div>
+            <div className="suggestion-list">
+              {autoAssignments.map((assignment) => (
+                <button
+                  className="suggestion-card"
+                  key={`${assignment.court.id}-${assignment.group.id}`}
+                  onClick={() => autoAssignGroup(assignment)}
+                >
+                  <strong>{assignment.court.name}</strong>
                   <span>
-                    L{player.level} accepts {player.minLevel}-{player.maxLevel}
+                    {assignment.group.players
+                      .map((player) => `${player.name} (L${player.level})`)
+                      .join(', ')}
                   </span>
-                  <small>
-                    {player.paddle || 'No paddle'} · {player.gripColor || 'No grip'} ·{' '}
-                    {scoreLabel(player)}
-                  </small>
-                </div>
-                <div className="roster-actions">
-                  <button
-                    className={
-                      player.arrivalStatus === 'present'
-                        ? 'status present'
-                        : 'status away'
-                    }
-                    onClick={() => togglePlayerAvailability(player.id)}
-                  >
-                    {player.arrivalStatus}
-                  </button>
-                  <button
-                    className="ghost-button danger"
-                    onClick={() => removePlayer(player.id)}
-                  >
-                    Left
-                  </button>
-                </div>
-              </article>
-            ))}
-            {!players.length && (
-              <p className="hint">Late arrivals can be added any time.</p>
-            )}
-          </div>
+                </button>
+              ))}
+              {!autoAssignments.length && (
+                <p className="hint">No ready court currently matches a full group.</p>
+              )}
+            </div>
+          </section>
 
-          <div className="panel-title compact">
-            <Save />
-            <h2>Saved Players</h2>
-          </div>
-          <div className="saved-player-list">
-            {savedPlayers.map((player) => (
-              <button
-                className="saved-player-card"
-                disabled={activePlayerNames.has(player.name.toLowerCase())}
-                key={player.id}
-                onClick={() => addSavedPlayerToSession(player)}
-              >
-                <strong>{player.name}</strong>
-                <span>
-                  L{player.level} · {player.wins}W-{player.losses}L · Rank{' '}
-                  {player.rankingScore}
-                </span>
-              </button>
-            ))}
-            {!savedPlayers.length && (
-              <p className="hint">Saved profiles appear after players are added.</p>
-            )}
-          </div>
-        </aside>
+          <section
+            className="panel queue-panel"
+            onDrop={handleQueueDrop}
+            onDragOver={(event) => event.preventDefault()}
+          >
+            <div className="panel-title">
+              <UsersRound />
+              <h2>Standby Queue</h2>
+            </div>
+            <p className="hint">
+              Winners receive a higher wait priority when they return. Drag a
+              four-player group to a court, or use a suggested assignment.
+            </p>
+
+            <div className="queue-grid">
+              {queueGroups.map((group) => {
+                const canUseSelectedCourt =
+                  Boolean(selectedCourt) &&
+                  group.compatibleCourtIds.includes(selectedCourtId);
+
+                return (
+                  <article
+                    className={groupClassName(canUseSelectedCourt)}
+                    draggable
+                    key={group.id}
+                    onDragStart={(event) =>
+                      handleDragStart(event, {
+                        type: 'group',
+                        groupId: group.id,
+                        playerIds: group.playerIds,
+                      })
+                    }
+                  >
+                    <div className="queue-card-header">
+                      <span>
+                        <GripVertical size={16} />
+                        Group of 4
+                      </span>
+                      <small>Avg L{group.averageLevel.toFixed(1)}</small>
+                    </div>
+                    <div className="player-stack">
+                      {group.players.map((player) => (
+                        <div
+                          className="player-chip"
+                          draggable
+                          key={player.id}
+                          onDragStart={(event) =>
+                            handleDragStart(event, {
+                              type: 'player',
+                              playerId: player.id,
+                            })
+                          }
+                        >
+                          <span>
+                            {player.name}
+                            <small>{scoreLabel(player)}</small>
+                          </span>
+                          <span
+                            className="color-dot"
+                            style={{
+                              background: player.gripColor || '#94a3b8',
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="compatibility-list">
+                      Can play:{' '}
+                      {group.compatibleCourtIds.length
+                        ? group.compatibleCourtIds
+                            .map((courtId) =>
+                              courts.find((court) => court.id === courtId)?.name,
+                            )
+                            .join(', ')
+                        : 'No court fits'}
+                    </div>
+                  </article>
+                );
+              })}
+
+              {!queueGroups.length && (
+                <div className="empty-state">Add at least four available players.</div>
+              )}
+            </div>
+          </section>
+
+          <section className="panel player-table-panel">
+            <div className="panel-title">
+              <UsersRound />
+              <h2>Players</h2>
+            </div>
+            <div className="player-admin-table-wrap">
+              <table className="player-admin-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Lvl</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Paddle</th>
+                    <th>Grip</th>
+                    <th>Record</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {players.map((player) => (
+                    <tr key={player.id}>
+                      <td>
+                        <input
+                          value={player.name}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { name: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={player.arrivalStatus}
+                          onChange={(event) =>
+                            updatePlayer(player.id, {
+                              arrivalStatus: event.target.value as Player['arrivalStatus'],
+                            })
+                          }
+                        >
+                          <option value="present">Waiting</option>
+                          <option value="away">Unavailable</option>
+                          <option value="assigned">Assigned</option>
+                          <option value="playing">Playing</option>
+                          <option value="left">Left</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={player.level}
+                          onChange={(event) =>
+                            updatePlayer(player.id, {
+                              level: Number(event.target.value),
+                              ...getLevelRange(Number(event.target.value)),
+                            })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={player.minLevel}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { minLevel: Number(event.target.value) })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={player.maxLevel}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { maxLevel: Number(event.target.value) })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          list="paddle-options"
+                          value={player.paddle}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { paddle: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          list="grip-color-options"
+                          value={player.gripColor}
+                          onChange={(event) =>
+                            updatePlayer(player.id, { gripColor: event.target.value })
+                          }
+                        />
+                      </td>
+                      <td>{scoreLabel(player)}</td>
+                      <td>
+                        <button
+                          className="ghost-button danger compact-button"
+                          onClick={() => removePlayer(player.id)}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!players.length && <p className="hint">Use Add / edit players to start.</p>}
+          </section>
         </section>
       )}
     </main>
