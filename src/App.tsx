@@ -11,7 +11,7 @@ import {
   UsersRound,
   X,
 } from 'lucide-react';
-import { DragEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
 import {
   buildAutoAssignments,
@@ -54,6 +54,7 @@ const isLockedPublicView = (() => {
 interface BulkPlayerRow extends PlayerForm {
   rowId: string;
   savedPlayerId: string;
+  playerId: string | null;
 }
 
 const splitRowsIntoColumns = (rows: BulkPlayerRow[]): BulkPlayerRow[][] => {
@@ -72,10 +73,39 @@ const createBulkRow = (): BulkPlayerRow => ({
   gripColor: '',
   preferredPartnerName: '',
   savedPlayerId: '',
+  playerId: null,
   arrivalStatus: 'present',
 });
 
 const createBulkRows = () => Array.from({ length: 40 }, createBulkRow);
+
+const buildBulkRowsFromPlayers = (players: Player[]): BulkPlayerRow[] => {
+  const rows: BulkPlayerRow[] = createBulkRows();
+  const taken = new Set<number>();
+
+  players.forEach((player) => {
+    const index = rows.findIndex((_, idx) => !taken.has(idx));
+    if (index < 0) {
+      return;
+    }
+    taken.add(index);
+    rows[index] = {
+      ...rows[index],
+      playerId: player.id,
+      name: player.name,
+      level: player.level,
+      minLevel: player.minLevel,
+      maxLevel: player.maxLevel,
+      paddle: player.paddle,
+      gripColor: player.gripColor,
+      preferredPartnerName: player.preferredPartnerName,
+      arrivalStatus: player.arrivalStatus,
+      savedPlayerId: player.persistentId ?? '',
+    };
+  });
+
+  return rows;
+};
 
 const createInitialCourts = (): Court[] =>
   Array.from({ length: DEFAULT_COURTS }, (_, index) => ({
@@ -205,7 +235,47 @@ export default function App() {
     initialViewParam === 'standings' ? 'standings' : 'queue',
   );
   const [bulkAddError, setBulkAddError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const savePromiseRef = useRef<Promise<void> | null>(null);
   const [now, setNow] = useState(0);
+
+  const buildAppData = useCallback(
+    (): AppData => ({
+      sessionDate,
+      players,
+      courts,
+      maxMinutes,
+      savedPlayers,
+      savedPaddles: paddleOptions,
+      savedGripColors: gripColorOptions,
+    }),
+    [courts, gripColorOptions, maxMinutes, paddleOptions, players, savedPlayers, sessionDate],
+  );
+
+  const flushSave = useCallback(async () => {
+    if (isLockedPublicView) {
+      return;
+    }
+
+    if (savePromiseRef.current) {
+      await savePromiseRef.current;
+      return;
+    }
+
+    setIsSaving(true);
+    const promise = saveOpenPlayData(buildAppData())
+      .then(() =>
+        setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)'),
+      )
+      .catch(() => setSaveStatus('Save failed'))
+      .finally(() => {
+        setIsSaving(false);
+        savePromiseRef.current = null;
+      });
+
+    savePromiseRef.current = promise;
+    await promise;
+  }, [buildAppData]);
 
   const goToViewMode = (mode: 'admin' | 'player') => {
     if (isLockedPublicView) {
@@ -290,23 +360,11 @@ export default function App() {
       return;
     }
     const saveTimer = window.setTimeout(() => {
-      const data: AppData = {
-        sessionDate,
-        players,
-        courts,
-        maxMinutes,
-        savedPlayers,
-        savedPaddles: paddleOptions,
-        savedGripColors: gripColorOptions,
-      };
-
-      saveOpenPlayData(data)
-        .then(() => setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)'))
-        .catch(() => setSaveStatus('Save failed'));
+      void flushSave();
     }, SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(saveTimer);
-  }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, savedPlayers, sessionDate]);
+  }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, savedPlayers, sessionDate, flushSave]);
 
   const availablePlayers = useMemo(
     () => getAvailablePlayers(players),
@@ -318,6 +376,13 @@ export default function App() {
   const queueGroups = useMemo(
     () => createGroupsFromAvailablePlayers(availablePlayers, courts),
     [availablePlayers, courts],
+  );
+
+  const nextGroups = useMemo(() => queueGroups.slice(0, 2), [queueGroups]);
+  const nextGroupedIds = useMemo(() => new Set(nextGroups.flatMap((group) => group.playerIds)), [nextGroups]);
+  const upNextPlayers = useMemo(
+    () => waitingPlayers.filter((player) => !nextGroupedIds.has(player.id)),
+    [nextGroupedIds, waitingPlayers],
   );
 
   const selectedCourt = courts.find((court) => court.id === selectedCourtId);
@@ -417,7 +482,7 @@ export default function App() {
       minLevel: savedPlayer.minLevel,
       maxLevel: savedPlayer.maxLevel,
       paddle: savedPlayer.paddle,
-      gripColor: savedPlayer.gripColor,
+      gripColor: '',
       preferredPartnerName: '',
     });
   };
@@ -430,15 +495,22 @@ export default function App() {
     setBulkRows(createBulkRows());
   };
 
-  const clearBulkRow = (rowId: string) => {
+  const clearBulkRow = async (rowId: string) => {
+    if (isSaving) {
+      return;
+    }
     setBulkRows((currentRows) =>
       currentRows.map((row) =>
         row.rowId === rowId ? { ...createBulkRow(), rowId: row.rowId } : row,
       ),
     );
+    await flushSave();
   };
 
-  const handleBulkAdd = () => {
+  const handleBulkAdd = async () => {
+    if (isSaving) {
+      return;
+    }
     setBulkAddError('');
 
     const namedRows = bulkRows.filter((row) => row.name.trim());
@@ -453,22 +525,61 @@ export default function App() {
       seenInForm.add(key);
     }
 
-    const existingNames = new Set(players.map((player) => normalizePlayerName(player.name)));
-    for (const row of namedRows) {
-      if (existingNames.has(normalizePlayerName(row.name))) {
-        setBulkAddError(`Already added: ${row.name.trim()}. You cannot add the same name twice.`);
+    const editedPlayers = namedRows.map((row) => {
+      const existing = row.playerId ? players.find((player) => player.id === row.playerId) : null;
+      const savedPlayer = savedPlayers.find((player) => player.id === row.savedPlayerId);
+
+      if (existing) {
+        return {
+          ...existing,
+          name: row.name.trim(),
+          level: Number(row.level),
+          minLevel: Number(row.minLevel),
+          maxLevel: Number(row.maxLevel),
+          paddle: row.paddle.trim(),
+          preferredPartnerName: row.preferredPartnerName.trim(),
+        } satisfies Player;
+      }
+
+      return {
+        id: crypto.randomUUID(),
+        persistentId: savedPlayer?.id ?? null,
+        name: row.name.trim(),
+        level: Number(row.level),
+        minLevel: Number(row.minLevel),
+        maxLevel: Number(row.maxLevel),
+        paddle: row.paddle.trim(),
+        gripColor: '',
+        preferredPartnerName: row.preferredPartnerName.trim(),
+        partnerId: null,
+        arrivalStatus: 'present',
+        wins: savedPlayer?.wins ?? 0,
+        losses: savedPlayer?.losses ?? 0,
+        gamesPlayed: savedPlayer?.gamesPlayed ?? 0,
+        waitScore: 0,
+        lastResult: null,
+        lockedGroupId: null,
+        rankingScore: savedPlayer?.rankingScore ?? 0,
+      } satisfies Player;
+    });
+
+    const existingNames = new Map(
+      players.map((player) => [player.id, normalizePlayerName(player.name)] as const),
+    );
+
+    for (const player of editedPlayers) {
+      const otherName = Array.from(existingNames.entries()).find(
+        ([id, name]) => id !== player.id && name === normalizePlayerName(player.name),
+      );
+      if (otherName) {
+        setBulkAddError(`Duplicate name: ${player.name}. Each player name must be unique.`);
         return;
       }
     }
 
-    const newPlayers = namedRows.map((row) => {
-      const savedPlayer = savedPlayers.find((player) => player.id === row.savedPlayerId);
-      return buildPlayer(row, savedPlayer);
-    });
-
-    addPlayersToSession(newPlayers);
-    setBulkRows(createBulkRows());
-    setIsBulkModalOpen(false);
+    setPlayers(editedPlayers);
+    setBulkRows(buildBulkRowsFromPlayers(editedPlayers));
+    await flushSave();
   };
 
   const updatePlayer = (playerId: string, updates: Partial<Player>) => {
@@ -523,8 +634,12 @@ export default function App() {
     );
   };
 
-  const markPlayerLeft = (playerId: string) => {
+  const markPlayerLeft = async (playerId: string) => {
+    if (isSaving) {
+      return;
+    }
     updatePlayer(playerId, { arrivalStatus: 'left' });
+    await flushSave();
   };
 
   const buildMatch = (groupPlayerIds: string[]): Match | null => {
@@ -914,11 +1029,6 @@ export default function App() {
               <option value={option} key={option} />
             ))}
           </datalist>
-          <datalist id="grip-color-options">
-            {gripColorOptions.map((option) => (
-              <option value={option} key={option} />
-            ))}
-          </datalist>
         </div>
       </section>
     </div>
@@ -991,24 +1101,36 @@ export default function App() {
       <section className="panel player-queue-panel">
         <div className="panel-title">
           <UsersRound />
-          <h2>Your queue</h2>
+          <h2>Up next</h2>
         </div>
         <div className="public-list">
-          {playerQueueRows.map((row) => (
-            <article className="public-card" key={row.player.id}>
-              <strong>
-                Group #{row.queuePosition} — {row.player.name}
-              </strong>
+          {nextGroups.length > 0 ? (
+            <article className="public-card">
+              <strong>Next groups (2)</strong>
               <span>
-                Waiting with:{' '}
-                {row.groupMates.length
-                  ? row.groupMates.map((player) => player.name).join(', ')
-                  : 'forming group'}
+                {nextGroups.map((group, index) => (
+                  <span key={group.id}>
+                    #{index + 1}:{' '}
+                    {group.players.map((player) => player.name).join(', ')}
+                    {index === nextGroups.length - 1 ? '' : ' · '}
+                  </span>
+                ))}
               </span>
-              <small>{scoreLabel(row.player)} · Standby</small>
+              <small>These are the next full groups that will be sent to courts.</small>
+            </article>
+          ) : null}
+
+          {upNextPlayers.map((player, index) => (
+            <article className="public-card" key={player.id}>
+              <strong>
+                #{index + 1} {player.name}
+              </strong>
+              <span>Priority order</span>
+              <small>{scoreLabel(player)}</small>
             </article>
           ))}
-          {!playerQueueRows.length && (
+
+          {!waitingPlayers.length && (
             <p className="hint">No waiting players are currently in the queue.</p>
           )}
         </div>
@@ -1199,6 +1321,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setBulkAddError('');
+                  setBulkRows(buildBulkRowsFromPlayers(players));
                   setIsBulkModalOpen(true);
                 }}
               >
@@ -1558,7 +1681,6 @@ export default function App() {
                     <th>Min</th>
                     <th>Max</th>
                     <th>Paddle</th>
-                    <th>Grip</th>
                     <th>Record</th>
                     <th />
                   </tr>
@@ -1641,15 +1763,6 @@ export default function App() {
                           value={player.paddle}
                           onChange={(event) =>
                             updatePlayer(player.id, { paddle: event.target.value })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          list="grip-color-options"
-                          value={player.gripColor}
-                          onChange={(event) =>
-                            updatePlayer(player.id, { gripColor: event.target.value })
                           }
                         />
                       </td>
@@ -1747,15 +1860,6 @@ export default function App() {
                           value={player.paddle}
                           onChange={(event) =>
                             updatePlayer(player.id, { paddle: event.target.value })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          list="grip-color-options"
-                          value={player.gripColor}
-                          onChange={(event) =>
-                            updatePlayer(player.id, { gripColor: event.target.value })
                           }
                         />
                       </td>
