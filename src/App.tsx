@@ -789,7 +789,7 @@ export default function App() {
       <section className="bulk-modal" aria-labelledby="bulk-add-title" role="dialog">
         <div className="modal-header bulk-modal-header">
           <div>
-            <h2 id="bulk-add-title">Bulk Add Players</h2>
+            <h2 id="bulk-add-title">Manage Players</h2>
             <p>
               Type a new player or select an existing saved player. Existing
               players auto-fill paddle, level, and grip color.
@@ -804,7 +804,7 @@ export default function App() {
               Reset rows
             </button>
             <button className="primary-button" type="button" onClick={handleBulkAdd}>
-              Add players
+              Manage players
             </button>
             <button
               className="ghost-button"
@@ -1232,7 +1232,7 @@ export default function App() {
                 }}
               >
                 <Plus size={18} />
-                Add / edit players
+                Manage players
               </button>
               <button
                 className="ghost-button"
@@ -1426,9 +1426,13 @@ export default function App() {
                       </div>
                     </div>
                   ) : (
-                    <div className="drop-zone">
-                      <CheckCircle2 />
-                      Drop group here or use auto assign
+                    <div className="court-surface">
+                      <span className="kitchen-line top" aria-hidden="true" />
+                      <span className="kitchen-line bottom" aria-hidden="true" />
+                      <div className="drop-zone">
+                        <CheckCircle2 />
+                        Drop group here or use auto assign
+                      </div>
                     </div>
                   )}
                 </article>
@@ -1791,7 +1795,7 @@ export default function App() {
                 </tbody>
               </table>
             </div>
-            {!players.length && <p className="hint">Use Add / edit players to start.</p>}
+            {!players.length && <p className="hint">Use Manage players to start.</p>}
           </section>
         </section>
       )}

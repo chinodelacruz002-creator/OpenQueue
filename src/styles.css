@@ -712,6 +712,10 @@ select {
   box-shadow: 0 2rem 5rem rgba(3, 18, 32, 0.32);
 }
 
+.bulk-modal {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .settings-modal {
   width: min(38rem, 100%);
 }
@@ -778,7 +782,7 @@ select {
 }
 
 .bulk-table-wrap {
-  overflow: auto;
+  overflow: visible;
   border: 1px solid #d9e6ef;
   border-radius: 1rem;
 }
