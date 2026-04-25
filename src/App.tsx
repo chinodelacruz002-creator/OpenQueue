@@ -45,6 +45,11 @@ interface BulkPlayerRow extends PlayerForm {
   savedPlayerId: string;
 }
 
+const splitRowsIntoColumns = (rows: BulkPlayerRow[]): BulkPlayerRow[][] => {
+  const midpoint = Math.ceil(rows.length / 2);
+  return [rows.slice(0, midpoint), rows.slice(midpoint)];
+};
+
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
 const createDefaultForm = (): PlayerForm => ({
@@ -69,7 +74,7 @@ const createBulkRow = (): BulkPlayerRow => ({
   arrivalStatus: 'present',
 });
 
-const createBulkRows = () => Array.from({ length: 8 }, createBulkRow);
+const createBulkRows = () => Array.from({ length: 40 }, createBulkRow);
 
 const createInitialCourts = (): Court[] =>
   Array.from({ length: DEFAULT_COURTS }, (_, index) => ({
@@ -84,6 +89,8 @@ const createInitialCourts = (): Court[] =>
 const createAppData = (): AppData => ({
   sessionDate: todayKey(),
   players: [],
+  courts: createInitialCourts(),
+  maxMinutes: DEFAULT_MAX_MINUTES,
   savedPlayers: [],
   savedPaddles: PADDLE_OPTIONS,
   savedGripColors: GRIP_COLOR_OPTIONS,
@@ -220,22 +227,48 @@ export default function App() {
       const appData = data ?? createAppData();
       setSessionDate(appData.sessionDate || todayKey());
       setPlayers(appData.players ?? []);
+      setCourts(appData.courts?.length ? appData.courts : createInitialCourts());
+      setMaxMinutes(appData.maxMinutes ?? DEFAULT_MAX_MINUTES);
       setSavedPlayers(appData.savedPlayers ?? []);
       setPaddleOptions(mergeOptions(PADDLE_OPTIONS, appData.savedPaddles ?? []));
       setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, appData.savedGripColors ?? []));
       setSaveStatus(hasSupabaseConfig ? 'Loaded from Supabase' : 'Loaded from this browser');
     });
 
+    const refreshTimer = window.setInterval(() => {
+      if (viewMode !== 'player') {
+        return;
+      }
+
+      loadOpenPlayData().then((data) => {
+        if (!mounted || !data) {
+          return;
+        }
+
+        setSessionDate(data.sessionDate || todayKey());
+        setPlayers(data.players ?? []);
+        setCourts(data.courts ?? createInitialCourts());
+        setMaxMinutes(data.maxMinutes ?? DEFAULT_MAX_MINUTES);
+        setSavedPlayers(data.savedPlayers ?? []);
+        setPaddleOptions(mergeOptions(PADDLE_OPTIONS, data.savedPaddles ?? []));
+        setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, data.savedGripColors ?? []));
+        setSaveStatus(hasSupabaseConfig ? 'Synced from Supabase' : 'Synced locally');
+      });
+    }, 5000);
+
     return () => {
       mounted = false;
+      window.clearInterval(refreshTimer);
     };
-  }, []);
+  }, [viewMode]);
 
   useEffect(() => {
     const saveTimer = window.setTimeout(() => {
       const data: AppData = {
         sessionDate,
         players,
+        courts,
+        maxMinutes,
         savedPlayers,
         savedPaddles: paddleOptions,
         savedGripColors: gripColorOptions,
@@ -247,7 +280,7 @@ export default function App() {
     }, SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(saveTimer);
-  }, [gripColorOptions, paddleOptions, players, savedPlayers, sessionDate]);
+  }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, savedPlayers, sessionDate]);
 
   const availablePlayers = useMemo(
     () => getAvailablePlayers(players),
@@ -273,24 +306,19 @@ export default function App() {
 
   const playerQueueRows = useMemo(
     () =>
-      players.map((player) => {
-        const loadedCourt = courts.find((court) =>
-          court.match?.players.some((matchPlayer) => matchPlayer.id === player.id),
-        );
-        const queueGroupIndex = queueGroups.findIndex((group) =>
-          group.playerIds.includes(player.id),
-        );
-        const queueGroup = queueGroupIndex >= 0 ? queueGroups[queueGroupIndex] : null;
-
-        return {
+      queueGroups.flatMap((group, groupIndex) =>
+        group.players.map((player) => ({
           player,
-          loadedCourt,
-          queuePosition: queueGroupIndex >= 0 ? queueGroupIndex + 1 : null,
-          groupMates:
-            queueGroup?.players.filter((groupPlayer) => groupPlayer.id !== player.id) ?? [],
-        };
-      }),
-    [courts, players, queueGroups],
+          queuePosition: groupIndex + 1,
+          groupMates: group.players.filter((groupPlayer) => groupPlayer.id !== player.id),
+        })),
+      ),
+    [queueGroups],
+  );
+
+  const bulkRowsPerColumn = Math.ceil(bulkRows.length / 2);
+  const bulkColumnRows = splitRowsIntoColumns(bulkRows).filter(
+    (columnRows) => columnRows.length > 0,
   );
 
   const updateKnownOptions = (addedPlayers: Player[]) => {
@@ -358,7 +386,7 @@ export default function App() {
       maxLevel: savedPlayer.maxLevel,
       paddle: savedPlayer.paddle,
       gripColor: savedPlayer.gripColor,
-      preferredPartnerName: savedPlayer.preferredPartnerName,
+      preferredPartnerName: '',
     });
   };
 
@@ -722,7 +750,7 @@ export default function App() {
             <h2 id="bulk-add-title">Bulk Add Players</h2>
             <p>
               Type a new player or select an existing saved player. Existing
-              players auto-fill paddle, level, grip color, and partner details.
+              players auto-fill paddle, level, and grip color.
             </p>
           </div>
           <button
@@ -735,121 +763,117 @@ export default function App() {
           </button>
         </div>
 
-        <div className="bulk-table-wrap">
-          <table className="bulk-table">
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th>Level</th>
-                <th>Min</th>
-                <th>Max</th>
-                <th>Paddle</th>
-                <th>Grip</th>
-                <th>Partner</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {bulkRows.map((row) => (
-                <tr key={row.rowId}>
-                  <td>
-                    <input
-                      list="bulk-saved-player-names"
-                      value={row.name}
-                      onChange={(event) => updateBulkName(row.rowId, event.target.value)}
-                      placeholder="Player name"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={row.level}
-                      onChange={(event) =>
-                        updateBulkLevel(row.rowId, Number(event.target.value))
-                      }
-                    >
-                      {LEVELS.map((level) => (
-                        <option value={level} key={level}>
-                          {level}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <select
-                      value={row.minLevel}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, {
-                          minLevel: Number(event.target.value),
-                        })
-                      }
-                    >
-                      {LEVELS.map((level) => (
-                        <option value={level} key={level}>
-                          {level}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <select
-                      value={row.maxLevel}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, {
-                          maxLevel: Number(event.target.value),
-                        })
-                      }
-                    >
-                      {LEVELS.map((level) => (
-                        <option value={level} key={level}>
-                          {level}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      list="paddle-options"
-                      value={row.paddle}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, { paddle: event.target.value })
-                      }
-                      placeholder="Paddle"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      list="grip-color-options"
-                      value={row.gripColor}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, { gripColor: event.target.value })
-                      }
-                      placeholder="Color"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      value={row.preferredPartnerName}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, {
-                          preferredPartnerName: event.target.value,
-                        })
-                      }
-                      placeholder="Optional"
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="ghost-button danger compact-button"
-                      type="button"
-                      onClick={() => removeBulkRow(row.rowId)}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="bulk-table-groups">
+          {bulkColumnRows.map((columnRows, columnIndex) => (
+            <div className="bulk-table-wrap" key={`bulk-column-${columnIndex + 1}`}>
+              <table className="bulk-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Player</th>
+                    <th>Lvl</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Paddle</th>
+                    <th>Grip</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {columnRows.map((row, rowIndex) => (
+                    <tr key={row.rowId}>
+                      <td className="bulk-row-number">
+                        {columnIndex * bulkRowsPerColumn + rowIndex + 1}
+                      </td>
+                      <td>
+                        <input
+                          list="bulk-saved-player-names"
+                          value={row.name}
+                          onChange={(event) => updateBulkName(row.rowId, event.target.value)}
+                          placeholder="Player"
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={row.level}
+                          onChange={(event) =>
+                            updateBulkLevel(row.rowId, Number(event.target.value))
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={row.minLevel}
+                          onChange={(event) =>
+                            updateBulkRow(row.rowId, {
+                              minLevel: Number(event.target.value),
+                            })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={row.maxLevel}
+                          onChange={(event) =>
+                            updateBulkRow(row.rowId, {
+                              maxLevel: Number(event.target.value),
+                            })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          list="paddle-options"
+                          value={row.paddle}
+                          onChange={(event) =>
+                            updateBulkRow(row.rowId, { paddle: event.target.value })
+                          }
+                          placeholder="Paddle"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          list="grip-color-options"
+                          value={row.gripColor}
+                          onChange={(event) =>
+                            updateBulkRow(row.rowId, { gripColor: event.target.value })
+                          }
+                          placeholder="Color"
+                        />
+                      </td>
+                      <td>
+                        <button
+                          className="ghost-button danger compact-button"
+                          type="button"
+                          onClick={() => removeBulkRow(row.rowId)}
+                        >
+                          X
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
           <datalist id="bulk-saved-player-names">
             {savedPlayers.map((player) => (
               <option value={player.name} key={player.id} />
@@ -884,28 +908,15 @@ export default function App() {
           {playerQueueRows.map((row) => (
             <article className="public-card" key={row.player.id}>
               <strong>
-                {row.queuePosition ? `#${row.queuePosition}` : row.loadedCourt?.name ?? '-'}{' '}
-                {row.player.name}
+                #{row.queuePosition} {row.player.name}
               </strong>
               <span>
-                {row.loadedCourt
-                  ? `Assigned with ${row.loadedCourt.match?.players
-                      .filter((player) => player.id !== row.player.id)
-                      .map((player) => player.name)
-                      .join(', ')}`
-                  : `Waiting with ${
-                      row.groupMates.length
-                        ? row.groupMates.map((player) => player.name).join(', ')
-                        : 'forming group'
-                    }`}
+                Waiting with:{' '}
+                {row.groupMates.length
+                  ? row.groupMates.map((player) => player.name).join(', ')
+                  : 'forming group'}
               </span>
-              <small>
-                {row.loadedCourt
-                  ? `${row.loadedCourt.name} · ${row.loadedCourt.status}`
-                  : row.queuePosition
-                    ? 'Standby queue'
-                    : row.player.arrivalStatus}
-              </small>
+              <small>Standby queue</small>
             </article>
           ))}
           {!playerQueueRows.length && (
@@ -923,14 +934,15 @@ export default function App() {
           {courts.map((court) => {
             const elapsedSeconds = getElapsedSeconds(court.match, now);
             const playerNames = court.match?.players.map((player) => player.name).join(', ');
+            const emptyCourtLabel =
+              court.status === 'reserved' || court.status === 'unavailable'
+                ? court.status
+                : 'Available for next group';
 
             return (
-              <article className="public-card court-public-card" key={court.id}>
+              <article className={`public-card court-public-card ${court.status}`} key={court.id}>
                 <strong>{court.name}</strong>
-                <span>
-                  {playerNames ||
-                    (court.status === 'reserved' ? 'Reserved' : 'Available for next group')}
-                </span>
+                <span>{playerNames || emptyCourtLabel}</span>
                 <small>
                   Levels {court.minLevel}-{court.maxLevel} · {court.status}
                   {court.match?.startedAt ? ` · ${formatElapsedTime(elapsedSeconds)}` : ''}
@@ -1322,6 +1334,7 @@ export default function App() {
                     >
                       <option value="ready">Ready</option>
                       <option value="reserved">Reserved</option>
+                      <option value="unavailable">Unavailable</option>
                       <option value="loaded">Loaded</option>
                       <option value="playing">Playing</option>
                     </select>

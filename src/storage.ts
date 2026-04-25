@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { LOCAL_STORAGE_KEY } from './constants';
-import type { AppData, SavedPlayer } from './types';
+import type { AppData, Court, Player, SavedPlayer } from './types';
 
 interface PlayerRow {
   id: string;
@@ -17,6 +17,17 @@ interface PlayerRow {
   ranking_score: number;
 }
 
+interface OpenPlayStateRow {
+  id: string;
+  session_date: string;
+  players: Player[];
+  courts: Court[];
+  max_minutes: number;
+  saved_paddles: string[];
+  saved_grip_colors: string[];
+  updated_at: string;
+}
+
 const supabaseUrl =
   import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.VITE_NEXT_PUBLIC_SUPABASE_URL;
 const supabasePublishableKey =
@@ -29,6 +40,8 @@ const supabase =
     ? createClient(supabaseUrl, supabasePublishableKey)
     : null;
 
+const OPEN_PLAY_STATE_ID = 'current';
+
 export const hasSupabaseConfig = Boolean(supabase);
 
 export const loadOpenPlayData = async (): Promise<AppData | null> => {
@@ -36,23 +49,57 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
     return loadLocalData();
   }
 
-  const { data, error } = await supabase
+  const { data: playerRows, error: playerError } = await supabase
     .from('players')
     .select('*')
     .order('ranking_score', { ascending: false })
     .order('name', { ascending: true });
 
-  if (error) {
+  if (playerError) {
     return loadLocalData();
   }
 
+  const { data: stateRow, error: stateError } = await supabase
+    .from('open_play_state')
+    .select('*')
+    .eq('id', OPEN_PLAY_STATE_ID)
+    .maybeSingle<OpenPlayStateRow>();
+
   const localData = loadLocalData();
+  const savedPlayers = playerRows.map(mapRowToSavedPlayer);
+
+  if (stateError || !stateRow) {
+    return {
+      sessionDate: localData?.sessionDate ?? getTodayKey(),
+      players: localData?.players ?? [],
+      courts: localData?.courts ?? [],
+      maxMinutes: localData?.maxMinutes ?? 15,
+      savedPlayers,
+      savedPaddles: uniqueValues([
+        ...(localData?.savedPaddles ?? []),
+        ...playerRows.map((row) => row.paddle),
+      ]),
+      savedGripColors: uniqueValues([
+        ...(localData?.savedGripColors ?? []),
+        ...playerRows.map((row) => row.grip_color),
+      ]),
+    };
+  }
+
   return {
-    sessionDate: localData?.sessionDate ?? getTodayKey(),
-    players: localData?.players ?? [],
-    savedPlayers: data.map(mapRowToSavedPlayer),
-    savedPaddles: uniqueValues(data.map((row) => row.paddle)),
-    savedGripColors: uniqueValues(data.map((row) => row.grip_color)),
+    sessionDate: stateRow.session_date,
+    players: stateRow.players ?? [],
+    courts: stateRow.courts?.length ? stateRow.courts : (localData?.courts ?? []),
+    maxMinutes: stateRow.max_minutes ?? localData?.maxMinutes ?? 15,
+    savedPlayers,
+    savedPaddles: uniqueValues([
+      ...(stateRow.saved_paddles ?? []),
+      ...playerRows.map((row) => row.paddle),
+    ]),
+    savedGripColors: uniqueValues([
+      ...(stateRow.saved_grip_colors ?? []),
+      ...playerRows.map((row) => row.grip_color),
+    ]),
   };
 };
 
@@ -63,7 +110,19 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
     return;
   }
 
-  await supabase.from('players').upsert(data.savedPlayers.map(mapSavedPlayerToRow));
+  await Promise.all([
+    supabase.from('players').upsert(data.savedPlayers.map(mapSavedPlayerToRow)),
+    supabase.from('open_play_state').upsert({
+      id: OPEN_PLAY_STATE_ID,
+      session_date: data.sessionDate,
+      players: data.players,
+      courts: data.courts,
+      max_minutes: data.maxMinutes,
+      saved_paddles: data.savedPaddles,
+      saved_grip_colors: data.savedGripColors,
+      updated_at: new Date().toISOString(),
+    }),
+  ]);
 };
 
 const loadLocalData = (): AppData | null => {

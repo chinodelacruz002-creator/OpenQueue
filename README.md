@@ -6,27 +6,32 @@ courts, start match timers, and track person-by-person results.
 
 ## Features
 
-- Add one player or open a bulk-add table to type new players or select saved
-  players; saved selections auto-fill level, paddle, grip color, and partner.
+- Add one player or open a compact two-column bulk-add table for 35-40 players;
+  saved selections auto-fill level, paddle, and grip color.
 - Auto-fill level bandwidth defaults by player level. New players default to
   level 3 with a 2-3 accepted range; supported levels are 1-4.
 - Reuse saved player profiles, paddle options, and grip color options.
-- Configure the number of courts, each court name, court level range, and max
-  minutes of play.
+- Configure the number of courts, each court name, court level range, max
+  minutes of play, and visible court status colors for ready, reserved,
+  unavailable, loaded, and playing.
 - View four-player standby groups and the courts each group can play on.
 - Drag a group to a court or use automatic assignments for ready courts.
 - Remove an unavailable player from a loaded, not-yet-started court and
   automatically fill the slot with the next compatible standby player.
-- Switch to a player queue view so players can see their queue position,
-  expected groupmates, and currently loaded or playing courts.
+- Switch to a player queue view so waiting players can see their queue position
+  and expected groupmates, while assigned/playing players are shown only under
+  currently loaded or playing courts.
 - Start a court timer, mark individual winners, and return players to the queue.
 - Save wins, losses, games played, and ranking score for the next open play.
 - Mark late, unavailable, or leaving players directly from the roster.
 
 ## Supabase Persistence
 
-The app works with browser local storage by default. To save reusable player
-profiles in Supabase, create a `players` table with these columns:
+The app uses Supabase as the public shared state when configured, so the admin
+page and player phones see the same live queue and courts. Browser local storage
+is only a fallback for local development without Supabase env variables.
+
+Create the reusable player profile table:
 
 ```sql
 create table players (
@@ -43,6 +48,37 @@ create table players (
   games_played integer not null default 0,
   ranking_score integer not null default 0
 );
+```
+
+Create the live open play state table:
+
+```sql
+create table open_play_state (
+  id text primary key,
+  session_date date not null,
+  players jsonb not null default '[]'::jsonb,
+  courts jsonb not null default '[]'::jsonb,
+  max_minutes integer not null default 15,
+  saved_paddles text[] not null default '{}',
+  saved_grip_colors text[] not null default '{}',
+  updated_at timestamptz not null default now()
+);
+```
+
+For a public no-login deployment, enable Row Level Security and add public
+read/write policies for both tables:
+
+```sql
+alter table players enable row level security;
+alter table open_play_state enable row level security;
+
+create policy "Public read players" on players for select using (true);
+create policy "Public write players" on players for insert with check (true);
+create policy "Public update players" on players for update using (true);
+
+create policy "Public read open play state" on open_play_state for select using (true);
+create policy "Public write open play state" on open_play_state for insert with check (true);
+create policy "Public update open play state" on open_play_state for update using (true);
 ```
 
 Then set these environment variables. For Vite, use the `VITE_` names:
