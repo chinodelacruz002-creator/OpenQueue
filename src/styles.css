@@ -421,10 +421,10 @@ select {
 
 .bulk-modal {
   display: grid;
-  gap: 1rem;
-  width: min(78rem, 100%);
-  max-height: min(48rem, 92vh);
-  padding: 1rem;
+  gap: 0.75rem;
+  width: min(96rem, 100%);
+  max-height: min(54rem, 94vh);
+  padding: 0.85rem;
   overflow: hidden;
   background: #ffffff;
   border-radius: 1.25rem;
@@ -449,6 +449,14 @@ select {
   color: #66788a;
 }
 
+.bulk-table-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  min-height: 0;
+  overflow: auto;
+}
+
 .bulk-table-wrap {
   overflow: auto;
   border: 1px solid #d9e6ef;
@@ -457,13 +465,13 @@ select {
 
 .bulk-table {
   width: 100%;
-  min-width: 62rem;
+  min-width: 38rem;
   border-collapse: collapse;
 }
 
 .bulk-table th,
 .bulk-table td {
-  padding: 0.55rem;
+  padding: 0.28rem;
   text-align: left;
   border-bottom: 1px solid #e6eef5;
 }
@@ -473,25 +481,43 @@ select {
   top: 0;
   z-index: 1;
   color: #52697e;
-  font-size: 0.75rem;
+  font-size: 0.66rem;
   text-transform: uppercase;
   background: #f8fbfd;
 }
 
 .bulk-table input,
 .bulk-table select {
-  min-width: 6rem;
-  padding: 0.55rem 0.65rem;
+  min-width: 3.1rem;
+  min-height: 2rem;
+  padding: 0.35rem 0.42rem;
+  font-size: 0.8rem;
+  border-radius: 0.55rem;
 }
 
 .bulk-table td:first-child input {
-  min-width: 12rem;
+  min-width: 1.8rem;
+}
+
+.bulk-table td:nth-child(2) input {
+  min-width: 8rem;
+}
+
+.bulk-table td:nth-child(6) input {
+  min-width: 6.5rem;
 }
 
 .compact-button {
-  min-height: 2.1rem;
-  padding: 0.4rem 0.65rem;
-  font-size: 0.8rem;
+  min-height: 1.85rem;
+  padding: 0.25rem 0.45rem;
+  font-size: 0.74rem;
+}
+
+.bulk-row-number {
+  width: 2rem;
+  color: #66788a;
+  font-size: 0.75rem;
+  font-weight: 900;
 }
 
 .storage-status {
@@ -630,6 +656,10 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .bulk-table-groups {
+    grid-template-columns: 1fr;
+  }
+
   .hero-stats,
   .player-stack {
     grid-template-columns: 1fr;
@@ -693,6 +723,21 @@ select {
     min-height: 3rem;
     padding: 0.65rem;
     font-size: 0.86rem;
+  }
+
+  .bulk-modal {
+    max-height: 96vh;
+    padding: 0.65rem;
+    border-radius: 1rem;
+  }
+
+  .modal-header,
+  .bulk-actions {
+    display: grid;
+  }
+
+  .bulk-table {
+    min-width: 35rem;
   }
 
   .player-view {

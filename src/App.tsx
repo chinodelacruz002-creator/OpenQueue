@@ -45,6 +45,11 @@ interface BulkPlayerRow extends PlayerForm {
   savedPlayerId: string;
 }
 
+const splitRowsIntoColumns = (rows: BulkPlayerRow[]): BulkPlayerRow[][] => {
+  const midpoint = Math.ceil(rows.length / 2);
+  return [rows.slice(0, midpoint), rows.slice(midpoint)];
+};
+
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
 const createDefaultForm = (): PlayerForm => ({
@@ -69,7 +74,7 @@ const createBulkRow = (): BulkPlayerRow => ({
   arrivalStatus: 'present',
 });
 
-const createBulkRows = () => Array.from({ length: 8 }, createBulkRow);
+const createBulkRows = () => Array.from({ length: 40 }, createBulkRow);
 
 const createInitialCourts = (): Court[] =>
   Array.from({ length: DEFAULT_COURTS }, (_, index) => ({
@@ -293,6 +298,11 @@ export default function App() {
     [courts, players, queueGroups],
   );
 
+  const bulkRowsPerColumn = Math.ceil(bulkRows.length / 2);
+  const bulkColumnRows = splitRowsIntoColumns(bulkRows).filter(
+    (columnRows) => columnRows.length > 0,
+  );
+
   const updateKnownOptions = (addedPlayers: Player[]) => {
     setPaddleOptions((currentOptions) =>
       mergeOptions(currentOptions, addedPlayers.map((player) => player.paddle)),
@@ -358,7 +368,7 @@ export default function App() {
       maxLevel: savedPlayer.maxLevel,
       paddle: savedPlayer.paddle,
       gripColor: savedPlayer.gripColor,
-      preferredPartnerName: savedPlayer.preferredPartnerName,
+      preferredPartnerName: '',
     });
   };
 
@@ -722,7 +732,7 @@ export default function App() {
             <h2 id="bulk-add-title">Bulk Add Players</h2>
             <p>
               Type a new player or select an existing saved player. Existing
-              players auto-fill paddle, level, grip color, and partner details.
+              players auto-fill paddle, level, and grip color.
             </p>
           </div>
           <button
@@ -735,121 +745,117 @@ export default function App() {
           </button>
         </div>
 
-        <div className="bulk-table-wrap">
-          <table className="bulk-table">
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th>Level</th>
-                <th>Min</th>
-                <th>Max</th>
-                <th>Paddle</th>
-                <th>Grip</th>
-                <th>Partner</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {bulkRows.map((row) => (
-                <tr key={row.rowId}>
-                  <td>
-                    <input
-                      list="bulk-saved-player-names"
-                      value={row.name}
-                      onChange={(event) => updateBulkName(row.rowId, event.target.value)}
-                      placeholder="Player name"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={row.level}
-                      onChange={(event) =>
-                        updateBulkLevel(row.rowId, Number(event.target.value))
-                      }
-                    >
-                      {LEVELS.map((level) => (
-                        <option value={level} key={level}>
-                          {level}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <select
-                      value={row.minLevel}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, {
-                          minLevel: Number(event.target.value),
-                        })
-                      }
-                    >
-                      {LEVELS.map((level) => (
-                        <option value={level} key={level}>
-                          {level}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <select
-                      value={row.maxLevel}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, {
-                          maxLevel: Number(event.target.value),
-                        })
-                      }
-                    >
-                      {LEVELS.map((level) => (
-                        <option value={level} key={level}>
-                          {level}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      list="paddle-options"
-                      value={row.paddle}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, { paddle: event.target.value })
-                      }
-                      placeholder="Paddle"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      list="grip-color-options"
-                      value={row.gripColor}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, { gripColor: event.target.value })
-                      }
-                      placeholder="Color"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      value={row.preferredPartnerName}
-                      onChange={(event) =>
-                        updateBulkRow(row.rowId, {
-                          preferredPartnerName: event.target.value,
-                        })
-                      }
-                      placeholder="Optional"
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="ghost-button danger compact-button"
-                      type="button"
-                      onClick={() => removeBulkRow(row.rowId)}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="bulk-table-groups">
+          {bulkColumnRows.map((columnRows, columnIndex) => (
+            <div className="bulk-table-wrap" key={`bulk-column-${columnIndex + 1}`}>
+              <table className="bulk-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Player</th>
+                    <th>Lvl</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Paddle</th>
+                    <th>Grip</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {columnRows.map((row, rowIndex) => (
+                    <tr key={row.rowId}>
+                      <td className="bulk-row-number">
+                        {columnIndex * bulkRowsPerColumn + rowIndex + 1}
+                      </td>
+                      <td>
+                        <input
+                          list="bulk-saved-player-names"
+                          value={row.name}
+                          onChange={(event) => updateBulkName(row.rowId, event.target.value)}
+                          placeholder="Player"
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={row.level}
+                          onChange={(event) =>
+                            updateBulkLevel(row.rowId, Number(event.target.value))
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={row.minLevel}
+                          onChange={(event) =>
+                            updateBulkRow(row.rowId, {
+                              minLevel: Number(event.target.value),
+                            })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={row.maxLevel}
+                          onChange={(event) =>
+                            updateBulkRow(row.rowId, {
+                              maxLevel: Number(event.target.value),
+                            })
+                          }
+                        >
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          list="paddle-options"
+                          value={row.paddle}
+                          onChange={(event) =>
+                            updateBulkRow(row.rowId, { paddle: event.target.value })
+                          }
+                          placeholder="Paddle"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          list="grip-color-options"
+                          value={row.gripColor}
+                          onChange={(event) =>
+                            updateBulkRow(row.rowId, { gripColor: event.target.value })
+                          }
+                          placeholder="Color"
+                        />
+                      </td>
+                      <td>
+                        <button
+                          className="ghost-button danger compact-button"
+                          type="button"
+                          onClick={() => removeBulkRow(row.rowId)}
+                        >
+                          X
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
           <datalist id="bulk-saved-player-names">
             {savedPlayers.map((player) => (
               <option value={player.name} key={player.id} />
