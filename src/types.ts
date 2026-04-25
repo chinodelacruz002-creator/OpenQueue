@@ -1,4 +1,4 @@
-export type PlayerStatus = 'present' | 'playing' | 'away' | 'left';
+export type PlayerStatus = 'present' | 'assigned' | 'playing' | 'away' | 'left';
 
 export type CourtStatus = 'ready' | 'reserved' | 'loaded' | 'playing';
 

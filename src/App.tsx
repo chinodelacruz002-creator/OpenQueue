@@ -177,6 +177,21 @@ const parseBulkPlayers = (rawText: string, form: PlayerForm): Player[] =>
 
 const getPlayerIdsInMatch = (match: Match) => match.players.map((player) => player.id);
 
+const isPlayerCompatibleWithCourt = (player: Player, court: Court): boolean =>
+  player.maxLevel >= court.minLevel && player.minLevel <= court.maxLevel;
+
+const replacePlayerInMatch = (
+  match: Match,
+  removedPlayerId: string,
+  replacementPlayer: Player,
+): Match => ({
+  ...match,
+  players: match.players.map((player) =>
+    player.id === removedPlayerId ? replacementPlayer : player,
+  ),
+  winnerIds: match.winnerIds.filter((winnerId) => winnerId !== removedPlayerId),
+});
+
 export default function App() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [savedPlayers, setSavedPlayers] = useState<SavedPlayer[]>([]);
@@ -189,6 +204,7 @@ export default function App() {
   const [selectedCourtId, setSelectedCourtId] = useState('court-1');
   const [sessionDate, setSessionDate] = useState(todayKey);
   const [saveStatus, setSaveStatus] = useState('Loading saved players...');
+  const [viewMode, setViewMode] = useState<'admin' | 'player'>('admin');
   const [now, setNow] = useState(0);
 
   useEffect(() => {
@@ -256,6 +272,28 @@ export default function App() {
   const activePlayerNames = useMemo(
     () => new Set(players.map((player) => player.name.toLowerCase())),
     [players],
+  );
+
+  const playerQueueRows = useMemo(
+    () =>
+      players.map((player) => {
+        const loadedCourt = courts.find((court) =>
+          court.match?.players.some((matchPlayer) => matchPlayer.id === player.id),
+        );
+        const queueGroupIndex = queueGroups.findIndex((group) =>
+          group.playerIds.includes(player.id),
+        );
+        const queueGroup = queueGroupIndex >= 0 ? queueGroups[queueGroupIndex] : null;
+
+        return {
+          player,
+          loadedCourt,
+          queuePosition: queueGroupIndex >= 0 ? queueGroupIndex + 1 : null,
+          groupMates:
+            queueGroup?.players.filter((groupPlayer) => groupPlayer.id !== player.id) ?? [],
+        };
+      }),
+    [courts, players, queueGroups],
   );
 
   const updateKnownOptions = (addedPlayers: Player[]) => {
@@ -338,6 +376,22 @@ export default function App() {
     );
   };
 
+  const findReplacementPlayer = (
+    court: Court,
+    removedPlayerId: string,
+  ): Player | undefined => {
+    const currentPlayerIds = new Set(
+      court.match?.players
+        .map((player) => player.id)
+        .filter((playerId) => playerId !== removedPlayerId) ?? [],
+    );
+
+    return availablePlayers.find(
+      (player) =>
+        !currentPlayerIds.has(player.id) && isPlayerCompatibleWithCourt(player, court),
+    );
+  };
+
   const togglePlayerAvailability = (playerId: string) => {
     setPlayers((currentPlayers) =>
       currentPlayers.map((player) =>
@@ -396,11 +450,16 @@ export default function App() {
     );
 
     setPlayers((currentPlayers) =>
-      currentPlayers.map((player) =>
-        groupPlayerIds.includes(player.id)
-          ? { ...player, arrivalStatus: 'playing' }
-          : player,
-      ),
+      currentPlayers.map((player) => {
+        if (!groupPlayerIds.includes(player.id)) {
+          return player;
+        }
+
+        return {
+          ...player,
+          arrivalStatus: 'assigned',
+        };
+      }),
     );
   };
 
@@ -409,6 +468,9 @@ export default function App() {
   };
 
   const startMatch = (courtId: string) => {
+    const court = courts.find((item) => item.id === courtId);
+    const playerIds = court?.match ? getPlayerIdsInMatch(court.match) : [];
+
     setCourts((currentCourts) =>
       currentCourts.map((court) =>
         court.id === courtId && court.match
@@ -418,6 +480,12 @@ export default function App() {
               match: { ...court.match, startedAt: Date.now() },
             }
           : court,
+      ),
+    );
+
+    setPlayers((currentPlayers) =>
+      currentPlayers.map((player) =>
+        playerIds.includes(player.id) ? { ...player, arrivalStatus: 'playing' } : player,
       ),
     );
   };
@@ -496,6 +564,47 @@ export default function App() {
     updateCourt(courtId, { status: 'ready', match: null });
   };
 
+  const removeLoadedPlayer = (courtId: string, removedPlayerId: string) => {
+    const court = courts.find((item) => item.id === courtId);
+
+    if (!court?.match || court.status === 'playing') {
+      return;
+    }
+
+    const replacement = findReplacementPlayer(court, removedPlayerId);
+
+    if (!replacement) {
+      setPlayers((currentPlayers) =>
+        currentPlayers.map((player) =>
+          player.id === removedPlayerId ? { ...player, arrivalStatus: 'away' } : player,
+        ),
+      );
+      updateCourt(courtId, {
+        status: 'ready',
+        match: null,
+      });
+      return;
+    }
+
+    const nextMatch = replacePlayerInMatch(court.match, removedPlayerId, replacement);
+
+    setPlayers((currentPlayers) =>
+      currentPlayers.map((player) => {
+        if (player.id === removedPlayerId) {
+          return { ...player, arrivalStatus: 'away' };
+        }
+
+        if (player.id === replacement.id) {
+          return { ...player, arrivalStatus: 'assigned' };
+        }
+
+        return player;
+      }),
+    );
+    updateCourt(courtId, { status: 'loaded', match: nextMatch });
+    setSelectedCourtId(courtId);
+  };
+
   const handleDragStart = (
     event: DragEvent<HTMLElement>,
     data: DragData,
@@ -550,6 +659,76 @@ export default function App() {
     setForm((currentForm) => ({ ...currentForm, [field]: value }));
   };
 
+  const renderPlayerView = () => (
+    <section className="player-view">
+      <section className="panel player-queue-panel">
+        <div className="panel-title">
+          <UsersRound />
+          <h2>Your Queue</h2>
+        </div>
+        <div className="public-list">
+          {playerQueueRows.map((row) => (
+            <article className="public-card" key={row.player.id}>
+              <strong>
+                {row.queuePosition ? `#${row.queuePosition}` : row.loadedCourt?.name ?? '-'}{' '}
+                {row.player.name}
+              </strong>
+              <span>
+                {row.loadedCourt
+                  ? `Assigned with ${row.loadedCourt.match?.players
+                      .filter((player) => player.id !== row.player.id)
+                      .map((player) => player.name)
+                      .join(', ')}`
+                  : `Waiting with ${
+                      row.groupMates.length
+                        ? row.groupMates.map((player) => player.name).join(', ')
+                        : 'forming group'
+                    }`}
+              </span>
+              <small>
+                {row.loadedCourt
+                  ? `${row.loadedCourt.name} · ${row.loadedCourt.status}`
+                  : row.queuePosition
+                    ? 'Standby queue'
+                    : row.player.arrivalStatus}
+              </small>
+            </article>
+          ))}
+          {!playerQueueRows.length && (
+            <p className="hint">No waiting players are currently in the queue.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">
+          <Clock3 />
+          <h2>Now Playing / Loaded</h2>
+        </div>
+        <div className="public-list">
+          {courts.map((court) => {
+            const elapsedSeconds = getElapsedSeconds(court.match, now);
+            const playerNames = court.match?.players.map((player) => player.name).join(', ');
+
+            return (
+              <article className="public-card court-public-card" key={court.id}>
+                <strong>{court.name}</strong>
+                <span>
+                  {playerNames ||
+                    (court.status === 'reserved' ? 'Reserved' : 'Available for next group')}
+                </span>
+                <small>
+                  Levels {court.minLevel}-{court.maxLevel} · {court.status}
+                  {court.match?.startedAt ? ` · ${formatElapsedTime(elapsedSeconds)}` : ''}
+                </small>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    </section>
+  );
+
   return (
     <main className="app-shell">
       <section className="hero">
@@ -577,7 +756,25 @@ export default function App() {
         </div>
       </section>
 
-      <section className="layout">
+      <div className="view-toggle">
+        <button
+          className={viewMode === 'admin' ? 'primary-button' : 'ghost-button'}
+          onClick={() => setViewMode('admin')}
+        >
+          Admin View
+        </button>
+        <button
+          className={viewMode === 'player' ? 'primary-button' : 'ghost-button'}
+          onClick={() => setViewMode('player')}
+        >
+          Player Queue View
+        </button>
+      </div>
+
+      {viewMode === 'player' ? (
+        renderPlayerView()
+      ) : (
+        <section className="layout">
         <aside className="panel admin-panel">
           <div className="panel-title">
             <UserRound />
@@ -960,20 +1157,42 @@ export default function App() {
                       <div className="match-player-grid">
                         {court.match.players.map((player) => {
                           const isWinner = court.match?.winnerIds.includes(player.id);
+                          const canSubstitute = court.status === 'loaded';
 
                           return (
-                            <button
+                            <div
                               className={`match-player-card ${isWinner ? 'winner' : ''}`}
-                              disabled={court.status !== 'playing'}
                               key={player.id}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                toggleMatchWinner(court.id, player.id);
-                              }}
                             >
-                              <strong>{player.name}</strong>
-                              <span>{isWinner ? 'Winner' : 'Tap if won'}</span>
-                            </button>
+                              <button
+                                className="match-result-button"
+                                disabled={court.status !== 'playing'}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleMatchWinner(court.id, player.id);
+                                }}
+                              >
+                                <strong>{player.name}</strong>
+                                <span>
+                                  {court.status === 'playing'
+                                    ? isWinner
+                                      ? 'Winner'
+                                      : 'Tap if won'
+                                    : 'Loaded'}
+                                </span>
+                              </button>
+                              {canSubstitute && (
+                                <button
+                                  className="substitute-button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    removeLoadedPlayer(court.id, player.id);
+                                  }}
+                                >
+                                  Remove + fill
+                                </button>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
@@ -1092,7 +1311,8 @@ export default function App() {
             )}
           </div>
         </aside>
-      </section>
+        </section>
+      )}
     </main>
   );
 }

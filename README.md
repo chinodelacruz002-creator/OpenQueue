@@ -15,6 +15,10 @@ courts, start match timers, and track person-by-person results.
   minutes of play.
 - View four-player standby groups and the courts each group can play on.
 - Drag a group to a court or use automatic assignments for ready courts.
+- Remove an unavailable player from a loaded, not-yet-started court and
+  automatically fill the slot with the next compatible standby player.
+- Switch to a player queue view so players can see their queue position,
+  expected groupmates, and currently loaded or playing courts.
 - Start a court timer, mark individual winners, and return players to the queue.
 - Save wins, losses, games played, and ranking score for the next open play.
 - Mark late, unavailable, or leaving players directly from the roster.
