@@ -12,6 +12,11 @@ import {
   X,
 } from 'lucide-react';
 import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  logOpenQueueAction,
+  logUserInteraction,
+  type OpenQueueLogStatus,
+} from './actionLog';
 import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
 import {
   buildAutoAssignments,
@@ -44,6 +49,9 @@ const DEFAULT_MAX_MINUTES = 15;
 const SAVE_DEBOUNCE_MS = 500;
 
 const normalizePlayerName = (name: string) => name.trim().toLowerCase();
+
+const persistenceLabel = (): 'supabase' | 'local' =>
+  hasSupabaseConfig ? 'supabase' : 'local';
 
 const getInitialViewParam = () => new URLSearchParams(window.location.search).get('view');
 const isLockedPublicView = (() => {
@@ -127,27 +135,6 @@ const createAppData = (): AppData => ({
   savedGripColors: GRIP_COLOR_OPTIONS,
 });
 
-const buildPlayer = (form: PlayerForm, savedPlayer?: SavedPlayer): Player => ({
-  id: crypto.randomUUID(),
-  persistentId: savedPlayer?.id ?? null,
-  name: form.name.trim(),
-  level: Number(form.level),
-  minLevel: Number(form.minLevel),
-  maxLevel: Number(form.maxLevel),
-  paddle: form.paddle.trim(),
-  gripColor: form.gripColor.trim(),
-  preferredPartnerName: form.preferredPartnerName.trim(),
-  partnerId: null,
-  arrivalStatus: form.arrivalStatus,
-  wins: savedPlayer?.wins ?? 0,
-  losses: savedPlayer?.losses ?? 0,
-  gamesPlayed: savedPlayer?.gamesPlayed ?? 0,
-  waitScore: 0,
-  lastResult: null,
-  lockedGroupId: null,
-  rankingScore: savedPlayer?.rankingScore ?? 0,
-});
-
 const buildSavedPlayer = (player: Player): SavedPlayer => ({
   id: player.persistentId ?? player.id,
   name: player.name,
@@ -196,7 +183,7 @@ const upsertSavedPlayer = (
 
 const getPlayerIdsInMatch = (match: Match) => match.players.map((player) => player.id);
 
-const isPlayerCompatibleWithCourt = (_player: Player, _court: Court): boolean => true;
+const isPlayerCompatibleWithCourt = (): boolean => true;
 
 const replacePlayerInMatch = (
   match: Match,
@@ -238,6 +225,27 @@ export default function App() {
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const [now, setNow] = useState(0);
 
+  const logUserAction = useCallback(
+    (
+      action: string,
+      trigger: string,
+      status: OpenQueueLogStatus,
+      options?: { detail?: Record<string, unknown>; throttleKey?: string },
+    ) => {
+      logUserInteraction(
+        {
+          action,
+          trigger,
+          status,
+          persistence: persistenceLabel(),
+          detail: options?.detail,
+        },
+        options?.throttleKey ? { throttleKey: options.throttleKey } : undefined,
+      );
+    },
+    [],
+  );
+
   const buildAppData = useCallback(
     (): AppData => ({
       sessionDate,
@@ -251,39 +259,78 @@ export default function App() {
     [courts, gripColorOptions, maxMinutes, paddleOptions, players, savedPlayers, sessionDate],
   );
 
-  const flushSave = useCallback(async () => {
-    if (isLockedPublicView) {
-      return;
-    }
+  const flushSave = useCallback(
+    async (saveTrigger = 'debounced_state_change') => {
+      if (isLockedPublicView) {
+        logOpenQueueAction({
+          category: 'persistence',
+          action: 'save_open_play',
+          trigger: saveTrigger,
+          status: 'skipped',
+          persistence: persistenceLabel(),
+          detail: { reason: 'locked_public_view' },
+        });
+        return;
+      }
 
-    if (savePromiseRef.current) {
-      await savePromiseRef.current;
-      return;
-    }
+      if (savePromiseRef.current) {
+        await savePromiseRef.current;
+        return;
+      }
 
-    setIsSaving(true);
-    const promise = saveOpenPlayData(buildAppData())
-      .then(() =>
-        setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)'),
-      )
-      .catch(() => setSaveStatus('Save failed'))
-      .finally(() => {
-        setIsSaving(false);
-        savePromiseRef.current = null;
+      setIsSaving(true);
+      logOpenQueueAction({
+        category: 'persistence',
+        action: 'save_open_play',
+        trigger: saveTrigger,
+        status: 'started',
+        persistence: persistenceLabel(),
       });
 
-    savePromiseRef.current = promise;
-    await promise;
-  }, [buildAppData]);
+      const promise = saveOpenPlayData(buildAppData())
+        .then(() => {
+          logOpenQueueAction({
+            category: 'persistence',
+            action: 'save_open_play',
+            trigger: saveTrigger,
+            status: 'success',
+            persistence: persistenceLabel(),
+          });
+          setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          logOpenQueueAction({
+            category: 'persistence',
+            action: 'save_open_play',
+            trigger: saveTrigger,
+            status: 'failed',
+            persistence: persistenceLabel(),
+            error: message,
+          });
+          setSaveStatus('Save failed');
+        })
+        .finally(() => {
+          setIsSaving(false);
+          savePromiseRef.current = null;
+        });
+
+      savePromiseRef.current = promise;
+      await promise;
+    },
+    [buildAppData],
+  );
 
   const goToViewMode = (mode: 'admin' | 'player') => {
     if (isLockedPublicView) {
       return;
     }
+    logUserAction('switch_view_mode', `header.view_${mode}`, 'applied', { detail: { mode } });
     setViewMode(mode);
   };
 
   const setPublicViewAndUrl = (page: 'queue' | 'standings') => {
+    logUserAction('public_kiosk_page', `kiosk.${page}`, 'applied', { detail: { page } });
     setPublicPage(page);
     const view = page === 'standings' ? 'standings' : 'player';
     window.history.replaceState(null, '', `${pagePath}?view=${view}`);
@@ -316,6 +363,25 @@ export default function App() {
       if (!mounted) {
         return;
       }
+      if (data === null && hasSupabaseConfig) {
+        logOpenQueueAction({
+          category: 'data_load',
+          action: 'load_open_play',
+          trigger: 'app.initial_mount',
+          status: 'failed',
+          persistence: 'supabase',
+          error: 'loadOpenPlayData returned null',
+        });
+      } else {
+        logOpenQueueAction({
+          category: 'data_load',
+          action: 'load_open_play',
+          trigger: 'app.initial_mount',
+          status: 'success',
+          persistence: persistenceLabel(),
+          detail: { hasRemoteRow: Boolean(data) },
+        });
+      }
       applyLoad(data, 'initial');
     });
 
@@ -330,6 +396,25 @@ export default function App() {
     }
     return subscribeOpenPlayRealtime(() => {
       void loadOpenPlayData().then((data) => {
+        if (data === null && hasSupabaseConfig) {
+          logOpenQueueAction({
+            category: 'data_load',
+            action: 'load_open_play',
+            trigger: 'app.realtime_sync',
+            status: 'failed',
+            persistence: 'supabase',
+            error: 'loadOpenPlayData returned null',
+          });
+        } else {
+          logOpenQueueAction({
+            category: 'data_load',
+            action: 'load_open_play',
+            trigger: 'app.realtime_sync',
+            status: 'success',
+            persistence: persistenceLabel(),
+            detail: { hasRemoteRow: Boolean(data) },
+          });
+        }
         applyLoad(data, 'sync');
       });
     });
@@ -340,11 +425,42 @@ export default function App() {
     const needsPoll = !hasSupabaseConfig && (isLockedPublicView || viewMode === 'player');
     if (hasSupabaseConfig) {
       timer = window.setInterval(() => {
-        void loadOpenPlayData().then((data) => applyLoad(data, 'sync'));
+        void loadOpenPlayData().then((data) => {
+          if (data === null && hasSupabaseConfig) {
+            logOpenQueueAction({
+              category: 'data_load',
+              action: 'load_open_play',
+              trigger: 'app.interval_poll',
+              status: 'failed',
+              persistence: 'supabase',
+              error: 'loadOpenPlayData returned null',
+            });
+          } else {
+            logOpenQueueAction({
+              category: 'data_load',
+              action: 'load_open_play',
+              trigger: 'app.interval_poll',
+              status: 'success',
+              persistence: persistenceLabel(),
+              detail: { hasRemoteRow: Boolean(data) },
+            });
+          }
+          applyLoad(data, 'sync');
+        });
       }, 25000);
     } else if (needsPoll) {
       timer = window.setInterval(() => {
-        void loadOpenPlayData().then((data) => applyLoad(data, 'sync'));
+        void loadOpenPlayData().then((data) => {
+          logOpenQueueAction({
+            category: 'data_load',
+            action: 'load_open_play',
+            trigger: 'app.interval_poll_local',
+            status: 'success',
+            persistence: 'local',
+            detail: { hasRemoteRow: Boolean(data) },
+          });
+          applyLoad(data, 'sync');
+        });
       }, 5000);
     }
     return () => {
@@ -352,14 +468,14 @@ export default function App() {
         window.clearInterval(timer);
       }
     };
-  }, [applyLoad, hasSupabaseConfig, isLockedPublicView, viewMode]);
+  }, [applyLoad, viewMode]);
 
   useEffect(() => {
     if (isLockedPublicView) {
       return;
     }
     const saveTimer = window.setTimeout(() => {
-      void flushSave();
+      void flushSave('debounced_state_change');
     }, SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(saveTimer);
@@ -411,18 +527,6 @@ export default function App() {
     [courts, queueGroups],
   );
 
-  const playerQueueRows = useMemo(
-    () =>
-      queueGroups.flatMap((group, groupIndex) =>
-        group.players.map((player) => ({
-          player,
-          queuePosition: groupIndex + 1,
-          groupMates: group.players.filter((groupPlayer) => groupPlayer.id !== player.id),
-        })),
-      ),
-    [queueGroups],
-  );
-
   const { rosterActive, rosterInactive } = useMemo(() => {
     const active: Player[] = [];
     const inactive: Player[] = [];
@@ -450,30 +554,6 @@ export default function App() {
 
   const bulkRowsPerColumn = Math.ceil(bulkRows.length / 2);
   const bulkColumnRows = splitRowsIntoColumns(bulkRows);
-
-  const updateKnownOptions = (addedPlayers: Player[]) => {
-    setPaddleOptions((currentOptions) =>
-      mergeOptions(currentOptions, addedPlayers.map((player) => player.paddle)),
-    );
-    setGripColorOptions((currentOptions) =>
-      mergeOptions(currentOptions, addedPlayers.map((player) => player.gripColor)),
-    );
-  };
-
-  const addPlayersToSession = (newPlayers: Player[]) => {
-    if (!newPlayers.length) {
-      return;
-    }
-
-    setPlayers((currentPlayers) => [...currentPlayers, ...newPlayers]);
-    setSavedPlayers((currentSavedPlayers) =>
-      newPlayers.reduce(
-        (savedList, player) => upsertSavedPlayer(savedList, buildSavedPlayer(player)),
-        currentSavedPlayers,
-      ),
-    );
-    updateKnownOptions(newPlayers);
-  };
 
   const updateBulkRow = (
     rowId: string,
@@ -516,20 +596,30 @@ export default function App() {
 
   const clearBulkRow = async (rowId: string) => {
     if (isSaving) {
+      logUserAction('bulk_clear_row', 'bulk_modal.clear_row', 'skipped', {
+        detail: { rowId, reason: 'save_in_progress' },
+      });
       return;
     }
+    logUserAction('bulk_clear_row', 'bulk_modal.clear_row', 'applied', { detail: { rowId } });
     setBulkRows((currentRows) =>
       currentRows.map((row) =>
         row.rowId === rowId ? { ...createBulkRow(), rowId: row.rowId } : row,
       ),
     );
-    await flushSave();
+    await flushSave('bulk_clear_row');
   };
 
   const handleBulkAdd = async () => {
     if (isSaving) {
+      logUserAction('bulk_update_players', 'bulk_modal.update_players', 'skipped', {
+        detail: { reason: 'save_in_progress' },
+      });
       return;
     }
+    logUserAction('bulk_update_players', 'bulk_modal.update_players', 'started', {
+      detail: { namedRowCount: bulkRows.filter((row) => row.name.trim()).length },
+    });
     setBulkAddError('');
 
     const rawNamedRows = bulkRows.filter((row) => row.name.trim());
@@ -606,6 +696,9 @@ export default function App() {
       );
       if (otherName) {
         setBulkAddError(`Duplicate name: ${player.name}. Each player name must be unique.`);
+        logUserAction('bulk_update_players', 'bulk_modal.update_players', 'failed', {
+          detail: { reason: 'duplicate_name', playerName: player.name },
+        });
         return;
       }
     }
@@ -631,7 +724,10 @@ export default function App() {
 
     setPlayers(editedPlayers);
     setBulkRows(buildBulkRowsFromPlayers(editedPlayers));
-    await flushSave();
+    logUserAction('bulk_update_players', 'bulk_modal.update_players', 'applied', {
+      detail: { playerCount: editedPlayers.length },
+    });
+    await flushSave('bulk_update_players');
   };
 
   const updatePlayer = (playerId: string, updates: Partial<Player>) => {
@@ -642,8 +738,19 @@ export default function App() {
     );
   };
 
+  const onPlayerFieldChange = (playerId: string, field: string, updates: Partial<Player>) => {
+    logUserAction('player_field_edit', `player.${field}`, 'applied', {
+      detail: { playerId, field },
+      throttleKey: `player:${playerId}:${field}`,
+    });
+    updatePlayer(playerId, updates);
+  };
+
   const updateCourtCount = (count: number) => {
     const safeCount = Math.max(1, count);
+    logUserAction('settings_court_count', 'settings.court_count', 'applied', {
+      detail: { count: safeCount },
+    });
 
     setCourts((currentCourts) =>
       Array.from({ length: safeCount }, (_, index) => {
@@ -670,6 +777,26 @@ export default function App() {
     );
   };
 
+  const onCourtFieldChange = (courtId: string, field: string, updates: Partial<Court>) => {
+    logUserAction('court_field_edit', `court.${field}`, 'applied', {
+      detail: { courtId, field },
+      throttleKey: `court:${courtId}:${field}`,
+    });
+    updateCourt(courtId, updates);
+  };
+
+  const onBulkFieldChange = (
+    rowId: string,
+    field: string,
+    apply: () => void,
+  ) => {
+    logUserAction('bulk_modal_field_edit', `bulk_row.${field}`, 'applied', {
+      detail: { rowId, field },
+      throttleKey: `bulk:${rowId}:${field}`,
+    });
+    apply();
+  };
+
   const findReplacementPlayer = (
     court: Court,
     removedPlayerId: string,
@@ -682,16 +809,20 @@ export default function App() {
 
     return availablePlayers.find(
       (player) =>
-        !currentPlayerIds.has(player.id) && isPlayerCompatibleWithCourt(player, court),
+        !currentPlayerIds.has(player.id) && isPlayerCompatibleWithCourt(),
     );
   };
 
   const markPlayerLeft = async (playerId: string) => {
     if (isSaving) {
+      logUserAction('mark_player_left', 'roster.mark_left', 'skipped', {
+        detail: { playerId, reason: 'save_in_progress' },
+      });
       return;
     }
+    logUserAction('mark_player_left', 'roster.mark_left', 'applied', { detail: { playerId } });
     updatePlayer(playerId, { arrivalStatus: 'left' });
-    await flushSave();
+    await flushSave('mark_player_left');
   };
 
   const buildMatch = (groupPlayerIds: string[]): Match | null => {
@@ -716,8 +847,15 @@ export default function App() {
     const match = buildMatch(groupPlayerIds);
 
     if (!match) {
+      logUserAction('assign_group_to_court', 'court.assign_group', 'failed', {
+        detail: { courtId, groupSize: groupPlayerIds.length, reason: 'need_four_players' },
+      });
       return;
     }
+
+    logUserAction('assign_group_to_court', 'court.assign_group', 'applied', {
+      detail: { courtId, matchId: match.id, playerIds: groupPlayerIds },
+    });
 
     setCourts((currentCourts) =>
       currentCourts.map((court) =>
@@ -746,12 +884,23 @@ export default function App() {
   };
 
   const autoAssignGroup = (assignment: AutoAssignment) => {
+    logUserAction('auto_assign_group', 'suggestions.auto_assign', 'applied', {
+      detail: {
+        courtId: assignment.court.id,
+        groupId: assignment.group.id,
+        playerIds: assignment.group.playerIds,
+      },
+    });
     assignGroupToCourt(assignment.court.id, assignment.group.playerIds);
   };
 
   const startMatch = (courtId: string) => {
     const court = courts.find((item) => item.id === courtId);
     const playerIds = court?.match ? getPlayerIdsInMatch(court.match) : [];
+
+    logUserAction('start_match', 'court.start_timer', 'applied', {
+      detail: { courtId, playerIds },
+    });
 
     setCourts((currentCourts) =>
       currentCourts.map((court) =>
@@ -773,6 +922,10 @@ export default function App() {
   };
 
   const toggleMatchWinner = (courtId: string, playerId: string) => {
+    logUserAction('toggle_match_winner', 'court.toggle_winner', 'applied', {
+      detail: { courtId, playerId },
+    });
+
     setCourts((currentCourts) =>
       currentCourts.map((court) => {
         if (court.id !== courtId || !court.match) {
@@ -792,8 +945,19 @@ export default function App() {
     const court = courts.find((item) => item.id === courtId);
 
     if (!court?.match) {
+      logUserAction('close_match', 'court.save_results', 'skipped', {
+        detail: { courtId, reason: 'no_match' },
+      });
       return;
     }
+
+    logUserAction('close_match', 'court.save_results', 'applied', {
+      detail: {
+        courtId,
+        winnerIds: court.match.winnerIds,
+        playerIds: getPlayerIdsInMatch(court.match),
+      },
+    });
 
     const matchPlayerIds = getPlayerIdsInMatch(court.match);
     const winnerIds = court.match.winnerIds;
@@ -843,6 +1007,10 @@ export default function App() {
   const resetCourt = (courtId: string) => {
     const court = courts.find((item) => item.id === courtId);
 
+    logUserAction('reset_court', 'court.reset', 'applied', {
+      detail: { courtId, hadMatch: Boolean(court?.match) },
+    });
+
     if (court?.match) {
       const playerIds = getPlayerIdsInMatch(court.match);
 
@@ -862,12 +1030,22 @@ export default function App() {
     const court = courts.find((item) => item.id === courtId);
 
     if (!court?.match || court.status === 'playing') {
+      logUserAction('remove_loaded_player', 'court.remove_and_fill', 'skipped', {
+        detail: {
+          courtId,
+          removedPlayerId,
+          reason: !court?.match ? 'no_match' : 'court_playing',
+        },
+      });
       return;
     }
 
     const replacement = findReplacementPlayer(court, removedPlayerId);
 
     if (!replacement) {
+      logUserAction('remove_loaded_player', 'court.remove_and_fill', 'applied', {
+        detail: { courtId, removedPlayerId, filledWith: null, clearedCourt: true },
+      });
       setPlayers((currentPlayers) =>
         currentPlayers.map((player) =>
           player.id === removedPlayerId ? { ...player, arrivalStatus: 'away' } : player,
@@ -879,6 +1057,15 @@ export default function App() {
       });
       return;
     }
+
+    logUserAction('remove_loaded_player', 'court.remove_and_fill', 'applied', {
+      detail: {
+        courtId,
+        removedPlayerId,
+        filledWith: replacement.id,
+        clearedCourt: false,
+      },
+    });
 
     const nextMatch = replacePlayerInMatch(court.match, removedPlayerId, replacement);
 
@@ -903,6 +1090,15 @@ export default function App() {
     event: DragEvent<HTMLElement>,
     data: DragData,
   ) => {
+    if (data.type === 'group') {
+      logUserAction('drag_start_group', 'queue.drag_group', 'started', {
+        detail: { groupId: data.groupId, playerIds: data.playerIds },
+      });
+    } else {
+      logUserAction('drag_start_player', 'queue.drag_player', 'started', {
+        detail: { playerId: data.playerId },
+      });
+    }
     event.dataTransfer.setData('application/json', JSON.stringify(data));
     event.dataTransfer.effectAllowed = 'move';
   };
@@ -912,25 +1108,49 @@ export default function App() {
     courtId: string,
   ) => {
     event.preventDefault();
-    const rawData = event.dataTransfer.getData('application/json');
-    const data = JSON.parse(rawData) as DragData;
+    let data: DragData;
+    try {
+      const rawData = event.dataTransfer.getData('application/json');
+      data = JSON.parse(rawData) as DragData;
+    } catch {
+      logUserAction('court_drop', 'court.drop', 'failed', {
+        detail: { courtId, reason: 'invalid_drag_payload' },
+      });
+      return;
+    }
 
     if (data.type === 'group') {
       assignGroupToCourt(courtId, data.playerIds);
       return;
     }
 
+    logUserAction('select_court', 'court.drop_non_group', 'applied', { detail: { courtId } });
     setSelectedCourtId(courtId);
   };
 
   const handleQueueDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
-    const rawData = event.dataTransfer.getData('application/json');
-    const data = JSON.parse(rawData) as DragData;
-
-    if (data.type !== 'player') {
+    let data: DragData;
+    try {
+      const rawData = event.dataTransfer.getData('application/json');
+      data = JSON.parse(rawData) as DragData;
+    } catch {
+      logUserAction('queue_drop', 'queue.drop', 'failed', {
+        detail: { reason: 'invalid_drag_payload' },
+      });
       return;
     }
+
+    if (data.type !== 'player') {
+      logUserAction('queue_drop', 'queue.drop', 'skipped', {
+        detail: { dragType: data.type },
+      });
+      return;
+    }
+
+    logUserAction('return_player_to_queue', 'queue.drop_player', 'applied', {
+      detail: { playerId: data.playerId },
+    });
 
     setPlayers((currentPlayers) =>
       currentPlayers.map((player) =>
@@ -956,7 +1176,10 @@ export default function App() {
             <button
               className="ghost-button"
               type="button"
-              onClick={resetBulkRows}
+              onClick={() => {
+                logUserAction('bulk_reset_rows', 'bulk_modal.reset_rows', 'applied');
+                resetBulkRows();
+              }}
             >
               Reset rows
             </button>
@@ -967,6 +1190,7 @@ export default function App() {
               className="ghost-button"
               type="button"
               onClick={() => {
+                logUserAction('bulk_modal_close', 'bulk_modal.close', 'applied');
                 setBulkAddError('');
                 setIsBulkModalOpen(false);
               }}
@@ -1005,7 +1229,11 @@ export default function App() {
                         <input
                           list="bulk-saved-player-names"
                           value={row.name}
-                          onChange={(event) => updateBulkName(row.rowId, event.target.value)}
+                          onChange={(event) =>
+                            onBulkFieldChange(row.rowId, 'name', () =>
+                              updateBulkName(row.rowId, event.target.value),
+                            )
+                          }
                           placeholder="Player"
                         />
                       </td>
@@ -1013,7 +1241,9 @@ export default function App() {
                         <select
                           value={row.level}
                           onChange={(event) =>
-                            updateBulkLevel(row.rowId, Number(event.target.value))
+                            onBulkFieldChange(row.rowId, 'level', () =>
+                              updateBulkLevel(row.rowId, Number(event.target.value)),
+                            )
                           }
                         >
                           {LEVELS.map((level) => (
@@ -1027,9 +1257,11 @@ export default function App() {
                         <select
                           value={row.minLevel}
                           onChange={(event) =>
-                            updateBulkRow(row.rowId, {
-                              minLevel: Number(event.target.value),
-                            })
+                            onBulkFieldChange(row.rowId, 'minLevel', () =>
+                              updateBulkRow(row.rowId, {
+                                minLevel: Number(event.target.value),
+                              }),
+                            )
                           }
                         >
                           {LEVELS.map((level) => (
@@ -1043,9 +1275,11 @@ export default function App() {
                         <select
                           value={row.maxLevel}
                           onChange={(event) =>
-                            updateBulkRow(row.rowId, {
-                              maxLevel: Number(event.target.value),
-                            })
+                            onBulkFieldChange(row.rowId, 'maxLevel', () =>
+                              updateBulkRow(row.rowId, {
+                                maxLevel: Number(event.target.value),
+                              }),
+                            )
                           }
                         >
                           {LEVELS.map((level) => (
@@ -1060,7 +1294,9 @@ export default function App() {
                           list="paddle-options"
                           value={row.paddle}
                           onChange={(event) =>
-                            updateBulkRow(row.rowId, { paddle: event.target.value })
+                            onBulkFieldChange(row.rowId, 'paddle', () =>
+                              updateBulkRow(row.rowId, { paddle: event.target.value }),
+                            )
                           }
                           placeholder="Paddle"
                         />
@@ -1109,7 +1345,10 @@ export default function App() {
           <button
             className="ghost-button"
             type="button"
-            onClick={() => setIsSettingsModalOpen(false)}
+            onClick={() => {
+              logUserAction('settings_modal_close', 'settings.close', 'applied');
+              setIsSettingsModalOpen(false);
+            }}
           >
             <X size={18} />
             Close
@@ -1122,7 +1361,13 @@ export default function App() {
             <input
               type="date"
               value={sessionDate}
-              onChange={(event) => setSessionDate(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                logUserAction('settings_session_date', 'settings.session_date', 'applied', {
+                  detail: { sessionDate: next },
+                });
+                setSessionDate(next);
+              }}
             />
           </label>
           <label>
@@ -1140,7 +1385,13 @@ export default function App() {
               min={1}
               type="number"
               value={maxMinutes}
-              onChange={(event) => setMaxMinutes(Number(event.target.value))}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                logUserAction('settings_max_minutes', 'settings.max_minutes', 'applied', {
+                  detail: { maxMinutes: next },
+                });
+                setMaxMinutes(next);
+              }}
             />
           </label>
         </div>
@@ -1384,6 +1635,9 @@ export default function App() {
                 className="primary-button"
                 type="button"
                 onClick={() => {
+                  logUserAction('open_manage_players', 'admin.manage_players_open', 'applied', {
+                    detail: { playerCount: players.length },
+                  });
                   setBulkAddError('');
                   setBulkRows(buildBulkRowsFromPlayers(players));
                   setIsBulkModalOpen(true);
@@ -1395,7 +1649,10 @@ export default function App() {
               <button
                 className="ghost-button"
                 type="button"
-                onClick={() => setIsSettingsModalOpen(true)}
+                onClick={() => {
+                  logUserAction('open_settings', 'admin.settings_open', 'applied');
+                  setIsSettingsModalOpen(true);
+                }}
               >
                 <Settings size={18} />
                 Settings
@@ -1420,7 +1677,12 @@ export default function App() {
                     selectedCourtId === court.id ? 'selected' : ''
                   }`}
                   key={court.id}
-                  onClick={() => setSelectedCourtId(court.id)}
+                  onClick={() => {
+                    logUserAction('select_court', 'court.card_click', 'applied', {
+                      detail: { courtId: court.id },
+                    });
+                    setSelectedCourtId(court.id);
+                  }}
                   onDrop={(event) => handleCourtDrop(event, court.id)}
                   onDragOver={(event) => event.preventDefault()}
                 >
@@ -1430,7 +1692,7 @@ export default function App() {
                         aria-label={`${court.name} name`}
                         value={court.name}
                         onChange={(event) =>
-                          updateCourt(court.id, { name: event.target.value })
+                          onCourtFieldChange(court.id, 'name', { name: event.target.value })
                         }
                       />
                       <span>
@@ -1440,7 +1702,7 @@ export default function App() {
                     <select
                       value={court.status}
                       onChange={(event) =>
-                        updateCourt(court.id, {
+                        onCourtFieldChange(court.id, 'status', {
                           status: event.target.value as CourtStatus,
                         })
                       }
@@ -1719,7 +1981,7 @@ export default function App() {
                         <input
                           value={player.name}
                           onChange={(event) =>
-                            updatePlayer(player.id, { name: event.target.value })
+                            onPlayerFieldChange(player.id, 'name', { name: event.target.value })
                           }
                         />
                       </td>
@@ -1727,7 +1989,7 @@ export default function App() {
                         <select
                           value={player.arrivalStatus}
                           onChange={(event) =>
-                            updatePlayer(player.id, {
+                            onPlayerFieldChange(player.id, 'arrivalStatus', {
                               arrivalStatus: event.target.value as Player['arrivalStatus'],
                             })
                           }
@@ -1743,7 +2005,7 @@ export default function App() {
                         <select
                           value={player.level}
                           onChange={(event) =>
-                            updatePlayer(player.id, {
+                            onPlayerFieldChange(player.id, 'level', {
                               level: Number(event.target.value),
                               ...getLevelRange(Number(event.target.value)),
                             })
@@ -1760,7 +2022,9 @@ export default function App() {
                         <select
                           value={player.minLevel}
                           onChange={(event) =>
-                            updatePlayer(player.id, { minLevel: Number(event.target.value) })
+                            onPlayerFieldChange(player.id, 'minLevel', {
+                              minLevel: Number(event.target.value),
+                            })
                           }
                         >
                           {LEVELS.map((level) => (
@@ -1774,7 +2038,9 @@ export default function App() {
                         <select
                           value={player.maxLevel}
                           onChange={(event) =>
-                            updatePlayer(player.id, { maxLevel: Number(event.target.value) })
+                            onPlayerFieldChange(player.id, 'maxLevel', {
+                              maxLevel: Number(event.target.value),
+                            })
                           }
                         >
                           {LEVELS.map((level) => (
@@ -1789,7 +2055,7 @@ export default function App() {
                           list="paddle-options"
                           value={player.paddle}
                           onChange={(event) =>
-                            updatePlayer(player.id, { paddle: event.target.value })
+                            onPlayerFieldChange(player.id, 'paddle', { paddle: event.target.value })
                           }
                         />
                       </td>
@@ -1816,7 +2082,7 @@ export default function App() {
                         <input
                           value={player.name}
                           onChange={(event) =>
-                            updatePlayer(player.id, { name: event.target.value })
+                            onPlayerFieldChange(player.id, 'name', { name: event.target.value })
                           }
                         />
                       </td>
@@ -1824,7 +2090,7 @@ export default function App() {
                         <select
                           value={player.arrivalStatus}
                           onChange={(event) =>
-                            updatePlayer(player.id, {
+                            onPlayerFieldChange(player.id, 'arrivalStatus', {
                               arrivalStatus: event.target.value as Player['arrivalStatus'],
                             })
                           }
@@ -1840,7 +2106,7 @@ export default function App() {
                         <select
                           value={player.level}
                           onChange={(event) =>
-                            updatePlayer(player.id, {
+                            onPlayerFieldChange(player.id, 'level', {
                               level: Number(event.target.value),
                               ...getLevelRange(Number(event.target.value)),
                             })
@@ -1857,7 +2123,9 @@ export default function App() {
                         <select
                           value={player.minLevel}
                           onChange={(event) =>
-                            updatePlayer(player.id, { minLevel: Number(event.target.value) })
+                            onPlayerFieldChange(player.id, 'minLevel', {
+                              minLevel: Number(event.target.value),
+                            })
                           }
                         >
                           {LEVELS.map((level) => (
@@ -1871,7 +2139,9 @@ export default function App() {
                         <select
                           value={player.maxLevel}
                           onChange={(event) =>
-                            updatePlayer(player.id, { maxLevel: Number(event.target.value) })
+                            onPlayerFieldChange(player.id, 'maxLevel', {
+                              maxLevel: Number(event.target.value),
+                            })
                           }
                         >
                           {LEVELS.map((level) => (
@@ -1886,7 +2156,7 @@ export default function App() {
                           list="paddle-options"
                           value={player.paddle}
                           onChange={(event) =>
-                            updatePlayer(player.id, { paddle: event.target.value })
+                            onPlayerFieldChange(player.id, 'paddle', { paddle: event.target.value })
                           }
                         />
                       </td>

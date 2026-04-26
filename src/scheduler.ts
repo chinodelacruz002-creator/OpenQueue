@@ -128,9 +128,7 @@ const createQueueGroup = (players: Player[], courts: Court[]): QueueGroup => {
     averageLevel,
     minLevel,
     maxLevel,
-    compatibleCourtIds: courts
-      .filter((court) => isGroupCompatibleWithCourt(players, court))
-      .map((court) => court.id),
+    compatibleCourtIds: courts.filter(() => isGroupCompatibleWithCourt()).map((court) => court.id),
     priorityScore: players.reduce(
       (sum, player) =>
         sum + player.waitScore + player.rankingScore + player.wins * 3 - player.losses,
@@ -145,4 +143,4 @@ const createQueueGroup = (players: Player[], courts: Court[]): QueueGroup => {
 const getAverageLevel = (players: Player[]): number =>
   players.reduce((sum, player) => sum + player.level, 0) / players.length;
 
-const isGroupCompatibleWithCourt = (_players: Player[], _court: Court): boolean => true;
+const isGroupCompatibleWithCourt = (): boolean => true;
