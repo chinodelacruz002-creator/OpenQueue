@@ -392,7 +392,6 @@ export default function App() {
   const [registerPhone, setRegisterPhone] = useState('');
   const [registerLevel, setRegisterLevel] = useState(3);
   const [registerError, setRegisterError] = useState('');
-  const [registerDone, setRegisterDone] = useState('');
   /** Manual order of waiting `present` players for standby groups (swap / reorder). */
   const [queueManualOrder, setQueueManualOrder] = useState<string[]>([]);
   /** Public queue (`?view=player`): join flow — phone first, then new profile or returning saved player. */
@@ -606,7 +605,6 @@ export default function App() {
 
   const submitSelfRegister = async () => {
     setRegisterError('');
-    setRegisterDone('');
     const name = registerName.trim();
     if (!name) {
       setRegisterError('Please enter your name.');
@@ -651,9 +649,6 @@ export default function App() {
     localStorage.setItem(
       DEVICE_REGISTRATION_KEY,
       JSON.stringify({ playerId: result.playerId, sessionDate: sessionKey }),
-    );
-    setRegisterDone(
-      `You are on the list for ${sessionKey}. Scroll to “You” below.`,
     );
     setKioskJoinStep('phone');
     setKioskPhoneInput('');
