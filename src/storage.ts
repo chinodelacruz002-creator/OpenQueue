@@ -179,6 +179,35 @@ const isAppDataShape = (value: unknown): value is AppData => {
   return typeof o.sessionDate === 'string' && Array.isArray(o.players) && Array.isArray(o.courts);
 };
 
+/**
+ * Unsaved local edits that must not be replaced by a stale Supabase read.
+ * - If we have a server `updated_at` in the mirror, any extra gen is worth guarding.
+ * - If not (e.g. no `open_play_state` row yet), we still protect when the session is non-empty
+ *   so a missing row + empty "fallback" fetch cannot clear Manage players / bulk updates.
+ */
+const localMirrorGuardsUnsaved = (m: MirrorEnvelope | null): boolean => {
+  if (!m || m.persistenceGen <= m.savedGen) {
+    return false;
+  }
+  if (m.serverUpdatedAt) {
+    return true;
+  }
+  const a = m.app;
+  if (!a) {
+    return false;
+  }
+  if ((a.players?.length ?? 0) > 0) {
+    return true;
+  }
+  if (a.courts?.some((c) => c.match)) {
+    return true;
+  }
+  if ((a.queuePlayerOrder?.length ?? 0) > 0) {
+    return true;
+  }
+  return false;
+};
+
 const readMirrorEnvelope = (): MirrorEnvelope | null => {
   const raw = window.localStorage.getItem(SUPABASE_MIRROR_STORAGE_KEY);
   if (!raw) {
@@ -262,17 +291,8 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
   }
 
   const mirrorBeforeFetch = readMirrorEnvelope();
-  /**
-   * Local state was written to the mirror before the last successful save — do not clobber
-   * admin edits with a stale `open_play_state` row. Skip only after we have any server
-   * `updated_at` in the mirror so the first load can still hydrate from the network.
-   */
-  if (
-    mirrorBeforeFetch &&
-    mirrorBeforeFetch.persistenceGen > mirrorBeforeFetch.savedGen &&
-    mirrorBeforeFetch.serverUpdatedAt
-  ) {
-    return mirrorBeforeFetch.app;
+  if (mirrorBeforeFetch && localMirrorGuardsUnsaved(mirrorBeforeFetch)) {
+    return migrateAppData(mirrorBeforeFetch.app);
   }
 
   const { data: playerRows, error: playerError } = await supabase
@@ -295,6 +315,11 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
 
   const serverTs = stateRow?.updated_at ?? null;
 
+  const mirrorAfterFetch = readMirrorEnvelope();
+  if (mirrorAfterFetch && localMirrorGuardsUnsaved(mirrorAfterFetch)) {
+    return migrateAppData(mirrorAfterFetch.app);
+  }
+
   if (stateError || !stateRow) {
     const fallback: AppData = migrateAppData({
       sessionDate: getTodayKey(),
@@ -307,13 +332,17 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
       showPublicRanking: true,
       queuePlayerOrder: [],
     });
+    const afterFallbackRead = readMirrorEnvelope();
+    if (afterFallbackRead && localMirrorGuardsUnsaved(afterFallbackRead)) {
+      return migrateAppData(afterFallbackRead.app);
+    }
     const syncedGen = nextMirrorGeneration();
     writeMirrorEnvelope({
       v: MIRROR_VERSION,
       app: fallback,
       persistenceGen: syncedGen,
       savedGen: syncedGen,
-      serverUpdatedAt: serverTs,
+      serverUpdatedAt: serverTs ?? new Date(0).toISOString(),
     });
     return fallback;
   }
@@ -335,6 +364,11 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
     showPublicRanking: stateRow.show_public_ranking !== false,
     queuePlayerOrder: stateRow.queue_player_order ?? [],
   });
+
+  const beforeWriteMerged = readMirrorEnvelope();
+  if (beforeWriteMerged && localMirrorGuardsUnsaved(beforeWriteMerged)) {
+    return migrateAppData(beforeWriteMerged.app);
+  }
 
   const syncedGen = nextMirrorGeneration();
   const envelope: MirrorEnvelope = {

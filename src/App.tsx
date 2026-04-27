@@ -480,12 +480,10 @@ export default function App() {
     });
   }, []);
 
-  /** Commit pending state synchronously, then persist on the next microtask (avoids stale buildAppData when saving right after setState). */
+  /** Commit pending state synchronously, then persist. Runs after `flushSync` so `buildAppData` matches the committed tree. */
   const persistAfterFlushSync = useCallback((saveTrigger: string, commit: () => void) => {
     flushSync(commit);
-    queueMicrotask(() => {
-      void flushSaveRef.current(saveTrigger);
-    });
+    void flushSaveRef.current(saveTrigger);
   }, []);
 
   const goToViewMode = (mode: 'admin' | 'player') => {
@@ -931,7 +929,7 @@ export default function App() {
     });
   };
 
-  const handleBulkAdd = () => {
+  const handleBulkAdd = async () => {
     logUserAction('bulk_update_players', 'bulk_modal.update_players', 'started', {
       detail: { namedRowCount: bulkRows.filter((row) => row.name.trim()).length },
     });
@@ -1073,11 +1071,12 @@ export default function App() {
     logUserAction('bulk_update_players', 'bulk_modal.update_players', 'applied', {
       detail: { playerCount: sessionWithSaved.length },
     });
-    persistAfterFlushSync('bulk_update_players', () => {
+    flushSync(() => {
       setPlayers(sessionWithSaved);
       setSavedPlayers(mergedSaved);
       setBulkRows(buildBulkRowsFromPlayers(sessionWithSaved));
     });
+    await flushSaveRef.current('bulk_update_players');
   };
 
   const updatePlayer = (playerId: string, updates: Partial<Player>) => {
