@@ -109,7 +109,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 VITE_ADMIN_ACCESS_CODE=your-secret-admin-code
 ```
 
-`VITE_ADMIN_ACCESS_CODE` is required for the staff admin screen (not the public player links). It is compared to the value you type on the admin unlock page. Set a strong value in production and add it to GitHub Actions secrets for deploys.
+`VITE_ADMIN_ACCESS_CODE` is required for the staff admin screen (not the public player links). It is compared to the value you type on the admin unlock page. Set a strong value in production and add it to GitHub **Actions** repository secrets. The build step in `.github/workflows/deploy.yml` must pass that secret as `VITE_ADMIN_ACCESS_CODE` in `env` (Vite only sees variables present when `npm run build` runs); adding the secret under Settings without wiring it in the workflow leaves the value empty in the bundle.
 
 ### Troubleshooting (400 Bad Request from Supabase)
 
