@@ -468,44 +468,24 @@ tr.roster-inactive {
 }
 
 .court-public-card.ready {
-  border-left: 0.35rem solid #16a34a;
+  border-left: 0.4rem solid hsl(142 76% 36%);
 }
 
 .court-public-card.reserved {
-  border-left: 0.35rem solid #f97316;
+  border-left: 0.4rem solid hsl(var(--accent));
 }
 
 .court-public-card.loaded {
-  border-left: 0.35rem solid #2563eb;
+  border-left: 0.4rem solid hsl(217 91% 60%);
 }
 
 .court-public-card.playing {
-  border-left: 0.35rem solid #0d9488;
+  border-left: 0.4rem solid hsl(var(--primary));
 }
 
 .court-public-card.unavailable {
-  border-left: 0.35rem solid #dc2626;
-}
-
-.court-public-card.ready {
-  border-left: 0.45rem solid #16a34a;
-}
-
-.court-public-card.reserved {
-  border-left: 0.45rem solid #f97316;
-}
-
-.court-public-card.loaded {
-  border-left: 0.45rem solid #2563eb;
-}
-
-.court-public-card.playing {
-  border-left: 0.45rem solid #0d9488;
-}
-
-.court-public-card.unavailable {
-  border-left: 0.45rem solid #dc2626;
-  background: #fef2f2;
+  border-left: 0.4rem solid hsl(var(--destructive));
+  background: hsl(var(--destructive) / 0.06);
 }
 
 .admin-board {
@@ -1465,7 +1445,7 @@ select {
 
 @media (max-width: 560px) {
   body {
-    background: #f4f8fb;
+    background: hsl(var(--background));
   }
 
   .hero,
@@ -1512,8 +1492,9 @@ select {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     padding: 0.75rem 1rem;
-    background: rgba(244, 248, 251, 0.94);
+    background: hsl(var(--background) / 0.96);
     backdrop-filter: blur(0.5rem);
+    border-bottom: 1px solid hsl(var(--border));
   }
 
   .view-toggle button {
@@ -1563,7 +1544,7 @@ select {
     gap: 0.45rem;
     padding: 0.85rem;
     border-radius: 0.9rem;
-    box-shadow: 0 0.5rem 1.25rem rgba(25, 55, 82, 0.06);
+    box-shadow: 0 1px 2px hsl(var(--foreground) / 0.04);
   }
 
   .public-card strong {
@@ -1594,8 +1575,8 @@ select {
   padding: 1rem 1.25rem;
   text-align: center;
   font-size: 0.85rem;
-  color: #64748b;
-  border-top: 1px solid rgba(148, 163, 184, 0.35);
+  color: hsl(var(--muted-foreground));
+  border-top: 1px solid hsl(var(--border));
 }
 
 .register-shell .register-panel,
@@ -1617,8 +1598,10 @@ select {
 .register-field input,
 .register-field select {
   padding: 0.5rem 0.65rem;
-  border-radius: 0.5rem;
-  border: 1px solid #cbd5e1;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--input));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
 }
 
 .public-checkin-panel .public-checkin-step {
@@ -1644,9 +1627,9 @@ select {
 .settings-danger-zone {
   margin-top: 1.25rem;
   padding: 1rem;
-  border-radius: 0.75rem;
-  border: 1px dashed #f87171;
-  background: rgba(254, 226, 226, 0.35);
+  border-radius: var(--radius);
+  border: 1px dashed hsl(var(--destructive) / 0.45);
+  background: hsl(var(--destructive) / 0.08);
 }
 
 .settings-danger-zone p {
@@ -1667,7 +1650,7 @@ select {
 .record-cell small {
   display: inline-block;
   min-width: 3.25rem;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
 }
 
 .standings-subtoggle {
@@ -1675,5 +1658,5 @@ select {
 }
 
 .you-panel {
-  border-left: 4px solid #22c55e;
+  border-left: 4px solid hsl(var(--primary));
 }
