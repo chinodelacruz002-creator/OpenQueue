@@ -1,5 +1,4 @@
 import {
-  ArrowDownUp,
   CheckCircle2,
   Clock3,
   Database,
@@ -12,12 +11,8 @@ import {
   X,
 } from 'lucide-react';
 import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-<<<<<<< HEAD
-import {
-  logOpenQueueAction,
-  logUserInteraction,
-  type OpenQueueLogStatus,
-} from './actionLog';
+import { flushSync } from 'react-dom';
+import { logUserInteraction, type UserActionLogStatus } from './actionLog';
 import {
   ADMIN_UNLOCK_KEY,
   DEVICE_REGISTRATION_KEY,
@@ -27,13 +22,7 @@ import {
   getLevelRange,
   normalizePhoneDigits,
 } from './constants';
-=======
-import { flushSync } from 'react-dom';
-import { logUserInteraction, type UserActionLogStatus } from './actionLog';
-import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
->>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
 import {
-  buildAutoAssignments,
   createGroupsFromAvailablePlayers,
   formatElapsedTime,
   getAvailablePlayers,
@@ -43,13 +32,13 @@ import {
   appendSelfRegisteredPlayer,
   hasSupabaseConfig,
   loadOpenPlayData,
+  migrateAppData,
   saveOpenPlayData,
   subscribeOpenPlayRealtime,
   writeOptimisticMirror,
 } from './storage';
 import type {
   AppData,
-  AutoAssignment,
   Court,
   CourtStatus,
   DragData,
@@ -63,6 +52,8 @@ import './styles.css';
 const DEFAULT_COURTS = 4;
 const DEFAULT_MAX_MINUTES = 15;
 const SAVE_DEBOUNCE_MS = 500;
+const BRAND_FOOTER =
+  'Beta Version | Dev in Progress | Open Play Queue for Camsur Pickleball Club by Dev.Onich';
 
 const normalizePlayerName = (name: string) => name.trim().toLowerCase();
 
@@ -168,6 +159,7 @@ const createAppData = (): AppData => ({
   savedPaddles: PADDLE_OPTIONS,
   savedGripColors: GRIP_COLOR_OPTIONS,
   showPublicRanking: true,
+  queuePlayerOrder: [],
 });
 
 const mergeSavedAfterMatch = (
@@ -211,16 +203,9 @@ const mergeSavedAfterMatch = (
   };
 };
 
-const sessionScoreLabel = (player: Player) =>
-  `${player.wins}W-${player.losses}L · Today rank ${player.rankingScore}`;
-
-const overallRecordLabel = (player: Player, savedPlayers: SavedPlayer[]): string => {
-  const saved = savedPlayers.find((s) => s.id === player.persistentId);
-  if (!saved) {
-    return '—';
-  }
-  return `${saved.wins}W-${saved.losses}L · Overall rank ${saved.rankingScore}`;
-};
+/** Today’s session: wins, losses, games played (no ranking score in UI). */
+const sessionDayRecordLabel = (player: Player) =>
+  `${player.wins}W-${player.losses}L · ${player.gamesPlayed} games today`;
 
 const groupClassName = (canUseSelectedCourt: boolean) =>
   canUseSelectedCourt ? 'queue-card compatible' : 'queue-card';
@@ -317,6 +302,10 @@ export default function App() {
   const [registerLevel, setRegisterLevel] = useState(3);
   const [registerError, setRegisterError] = useState('');
   const [registerDone, setRegisterDone] = useState('');
+  /** Manual order of waiting `present` players for standby groups (swap / reorder). */
+  const [queueManualOrder, setQueueManualOrder] = useState<string[]>([]);
+  const [publicPhoneInput, setPublicPhoneInput] = useState('');
+  const [publicLookupMessage, setPublicLookupMessage] = useState('');
 
   const logUserAction = useCallback(
     (
@@ -349,6 +338,7 @@ export default function App() {
       savedPaddles: paddleOptions,
       savedGripColors: gripColorOptions,
       showPublicRanking,
+      queuePlayerOrder: queueManualOrder,
     }),
     [
       courts,
@@ -356,6 +346,7 @@ export default function App() {
       maxMinutes,
       paddleOptions,
       players,
+      queueManualOrder,
       savedPlayers,
       sessionDate,
       showPublicRanking,
@@ -459,9 +450,41 @@ export default function App() {
     }
     logUserAction('full_reset_today', 'admin.full_reset', 'applied');
     setPlayers([]);
+    setQueueManualOrder([]);
     setCourts((c) => resetCourtsKeepingLayout(c));
     setBulkRows(createBulkRows());
     await flushSave('full_reset_today');
+  };
+
+  const clearAllTodaySession = async () => {
+    if (
+      !window.confirm(
+        'Clear all courts, reset today’s in-session stats (W/L, games) for everyone still listed, and clear standby order? Saved player profiles in the database are not deleted.',
+      )
+    ) {
+      return;
+    }
+    if (isSaving) {
+      return;
+    }
+    logUserAction('clear_all_today', 'admin.clear_all_today', 'applied');
+    const nextPlayers = players.map((p) => ({
+      ...p,
+      wins: 0,
+      losses: 0,
+      gamesPlayed: 0,
+      waitScore: 0,
+      rankingScore: 0,
+      lastResult: null,
+      lockedGroupId: null,
+      arrivalStatus: 'present' as const,
+      joinedQueueAt: Date.now(),
+    }));
+    setPlayers(nextPlayers);
+    setBulkRows(buildBulkRowsFromPlayers(nextPlayers));
+    setQueueManualOrder([]);
+    setCourts((c) => resetCourtsKeepingLayout(c));
+    await flushSave('clear_all_today');
   };
 
   const tryAdminUnlock = () => {
@@ -488,6 +511,11 @@ export default function App() {
     const name = registerName.trim();
     if (!name) {
       setRegisterError('Please enter your name.');
+      return;
+    }
+    const phoneDigits = normalizePhoneDigits(registerPhone);
+    if (!phoneDigits) {
+      setRegisterError('Please enter a phone number so you can use the public queue view.');
       return;
     }
     const range = getLevelRange(registerLevel);
@@ -534,7 +562,7 @@ export default function App() {
   };
 
   const applyLoad = useCallback((data: AppData | null, kind: 'initial' | 'sync') => {
-    const appData = data ?? createAppData();
+    const appData = migrateAppData(data ?? createAppData());
     setSessionDate(appData.sessionDate || todayKey());
     setPlayers(appData.players ?? []);
     setCourts(appData.courts?.length ? appData.courts : createInitialCourts());
@@ -543,6 +571,7 @@ export default function App() {
     setPaddleOptions(mergeOptions(PADDLE_OPTIONS, appData.savedPaddles ?? []));
     setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, appData.savedGripColors ?? []));
     setShowPublicRanking(appData.showPublicRanking !== false);
+    setQueueManualOrder(appData.queuePlayerOrder ?? []);
     if (kind === 'initial') {
       setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
     } else {
@@ -606,6 +635,37 @@ export default function App() {
   }, [applyLoad, viewMode]);
 
   useEffect(() => {
+    const ids = new Set(players.map((p) => p.id));
+    setQueueManualOrder((prev) => prev.filter((id) => ids.has(id)));
+  }, [players]);
+
+  useEffect(() => {
+    if (!isLockedPublicView) {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const phoneParam = params.get('phone');
+    if (!phoneParam) {
+      return;
+    }
+    setPublicPhoneInput(phoneParam);
+    const digits = normalizePhoneDigits(phoneParam);
+    if (!digits) {
+      return;
+    }
+    const found = players.find((pl) => normalizePhoneDigits(pl.phone) === digits);
+    if (found) {
+      localStorage.setItem(
+        DEVICE_REGISTRATION_KEY,
+        JSON.stringify({ playerId: found.id, sessionDate }),
+      );
+      setPublicLookupMessage('This device is now linked to your place in the queue for today.');
+    } else {
+      setPublicLookupMessage('That phone is not on today’s list yet. Register first.');
+    }
+  }, [isLockedPublicView, players, sessionDate]);
+
+  useEffect(() => {
     if (isLockedPublicView || isRegisterView) {
       return;
     }
@@ -620,6 +680,7 @@ export default function App() {
     maxMinutes,
     paddleOptions,
     players,
+    queueManualOrder,
     savedPlayers,
     sessionDate,
     showPublicRanking,
@@ -633,19 +694,36 @@ export default function App() {
 
   const waitingPlayers = availablePlayers;
 
+  const orderedAvailablePlayers = useMemo(() => {
+    const waiting = getAvailablePlayers(players);
+    const byId = new Map(waiting.map((p) => [p.id, p]));
+    const listed = queueManualOrder
+      .map((id) => byId.get(id))
+      .filter((p): p is Player => Boolean(p));
+    const listedIds = new Set(listed.map((p) => p.id));
+    const rest = waiting.filter((p) => !listedIds.has(p.id));
+    return [...listed, ...rest];
+  }, [players, queueManualOrder]);
+
   const queueGroups = useMemo(
-    () => createGroupsFromAvailablePlayers(availablePlayers, courts),
-    [availablePlayers, courts],
+    () => createGroupsFromAvailablePlayers(orderedAvailablePlayers, courts),
+    [orderedAvailablePlayers, courts],
   );
 
-  const nextGroups = useMemo(() => queueGroups.slice(0, 2), [queueGroups]);
-  const nextGroupedIds = useMemo(() => new Set(nextGroups.flatMap((group) => group.playerIds)), [nextGroups]);
+  const nextGroups = useMemo(
+    () => queueGroups.filter((g) => g.playerIds.length > 0).slice(0, 4),
+    [queueGroups],
+  );
+  const nextGroupedIds = useMemo(
+    () => new Set(nextGroups.flatMap((group) => group.playerIds)),
+    [nextGroups],
+  );
   const fifoQueueOrder = useMemo(() => {
     const neutral: Player[] = [];
     const winners: Player[] = [];
     const losers: Player[] = [];
 
-    for (const player of waitingPlayers) {
+    for (const player of orderedAvailablePlayers) {
       if (player.gamesPlayed === 0 || player.lastResult === null) {
         neutral.push(player);
         continue;
@@ -658,7 +736,7 @@ export default function App() {
     }
 
     return [...neutral, ...winners, ...losers];
-  }, [waitingPlayers]);
+  }, [orderedAvailablePlayers]);
 
   const upNextPlayers = useMemo(
     () => fifoQueueOrder.filter((player) => !nextGroupedIds.has(player.id)),
@@ -666,11 +744,6 @@ export default function App() {
   );
 
   const selectedCourt = courts.find((court) => court.id === selectedCourtId);
-
-  const autoAssignments = useMemo(
-    () => buildAutoAssignments(courts, queueGroups),
-    [courts, queueGroups],
-  );
 
   const { rosterActive, rosterInactive } = useMemo(() => {
     const active: Player[] = [];
@@ -932,6 +1005,10 @@ export default function App() {
   };
 
   const onPlayerFieldChange = (playerId: string, field: string, updates: Partial<Player>) => {
+    const current = players.find((p) => p.id === playerId);
+    if (field === 'arrivalStatus' && current?.arrivalStatus === 'playing') {
+      return;
+    }
     logUserAction('player_field_edit', `player.${field}`, 'applied', {
       detail: { playerId, field },
       throttleKey: `player:${playerId}:${field}`,
@@ -1014,14 +1091,9 @@ export default function App() {
       return;
     }
     logUserAction('mark_player_left', 'roster.mark_left', 'applied', { detail: { playerId } });
-<<<<<<< HEAD
-    updatePlayer(playerId, { arrivalStatus: 'left', joinedQueueAt: null });
-    await flushSave('mark_player_left');
-=======
     persistAfterFlushSync('mark_player_left', () => {
-      updatePlayer(playerId, { arrivalStatus: 'left' });
+      updatePlayer(playerId, { arrivalStatus: 'left', joinedQueueAt: null });
     });
->>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
   };
 
   const buildMatch = (groupPlayerIds: string[]): Match | null => {
@@ -1061,8 +1133,8 @@ export default function App() {
         court.id === courtId
           ? {
               ...court,
-              status: 'loaded',
-              match,
+              status: 'playing',
+              match: { ...match, startedAt: Date.now() },
             }
           : court,
       ),
@@ -1076,23 +1148,12 @@ export default function App() {
 
         return {
           ...player,
-          arrivalStatus: 'assigned',
+          arrivalStatus: 'playing',
           joinedQueueAt: null,
         };
       }),
     );
     schedulePersistAfterMutation('assign_group_to_court');
-  };
-
-  const autoAssignGroup = (assignment: AutoAssignment) => {
-    logUserAction('auto_assign_group', 'suggestions.auto_assign', 'applied', {
-      detail: {
-        courtId: assignment.court.id,
-        groupId: assignment.group.id,
-        playerIds: assignment.group.playerIds,
-      },
-    });
-    assignGroupToCourt(assignment.court.id, assignment.group.playerIds);
   };
 
   const startMatch = (courtId: string) => {
@@ -1134,9 +1195,12 @@ export default function App() {
           return court;
         }
 
-        const winnerIds = court.match.winnerIds.includes(playerId)
-          ? court.match.winnerIds.filter((winnerId) => winnerId !== playerId)
-          : [...court.match.winnerIds, playerId];
+        const current = court.match.winnerIds;
+        const winnerIds = current.includes(playerId)
+          ? current.filter((winnerId) => winnerId !== playerId)
+          : current.length >= 2
+            ? current
+            : [...current, playerId];
 
         return { ...court, match: { ...court.match, winnerIds } };
       }),
@@ -1335,6 +1399,13 @@ export default function App() {
     courtId: string,
   ) => {
     event.preventDefault();
+    const targetCourt = courts.find((c) => c.id === courtId);
+    if (!targetCourt || targetCourt.match || targetCourt.status !== 'ready') {
+      logUserAction('court_drop', 'court.drop', 'skipped', {
+        detail: { courtId, reason: 'court_not_free' },
+      });
+      return;
+    }
     let data: DragData;
     try {
       const rawData = event.dataTransfer.getData('application/json');
@@ -1347,6 +1418,12 @@ export default function App() {
     }
 
     if (data.type === 'group') {
+      if (data.playerIds.length < 4) {
+        logUserAction('court_drop', 'court.drop', 'skipped', {
+          detail: { courtId, reason: 'incomplete_group' },
+        });
+        return;
+      }
       assignGroupToCourt(courtId, data.playerIds);
       // assignGroupToCourt already schedules persist
       return;
@@ -1389,6 +1466,65 @@ export default function App() {
     );
     schedulePersistAfterMutation('return_player_to_queue');
   };
+
+  const swapQueuePlayers = useCallback(
+    (playerIdA: string, playerIdB: string) => {
+      if (playerIdA === playerIdB) {
+        return;
+      }
+      setQueueManualOrder((prev) => {
+        const waiting = getAvailablePlayers(players);
+        const base =
+          prev.length > 0
+            ? prev.filter((id) => waiting.some((p) => p.id === id))
+            : waiting.map((p) => p.id);
+        const i = base.indexOf(playerIdA);
+        const j = base.indexOf(playerIdB);
+        if (i < 0 || j < 0) {
+          return prev;
+        }
+        const next = [...base];
+        const tmp = next[i]!;
+        next[i] = next[j]!;
+        next[j] = tmp;
+        return next;
+      });
+      schedulePersistAfterMutation('queue_reorder');
+    },
+    [players, schedulePersistAfterMutation],
+  );
+
+  const handleStandbyPlayerDrop = useCallback(
+    (event: DragEvent<HTMLElement>, targetPlayerId: string) => {
+      event.preventDefault();
+      event.stopPropagation();
+      let data: DragData;
+      try {
+        const rawData = event.dataTransfer.getData('application/json');
+        data = JSON.parse(rawData) as DragData;
+      } catch {
+        return;
+      }
+      if (data.type !== 'player' || data.playerId === targetPlayerId) {
+        return;
+      }
+      const dragging = players.find((p) => p.id === data.playerId);
+      const target = players.find((p) => p.id === targetPlayerId);
+      if (
+        !dragging ||
+        !target ||
+        dragging.arrivalStatus !== 'present' ||
+        target.arrivalStatus !== 'present'
+      ) {
+        return;
+      }
+      logUserAction('queue_swap', 'queue.standby_swap', 'applied', {
+        detail: { a: data.playerId, b: targetPlayerId },
+      });
+      swapQueuePlayers(dragging.id, target.id);
+    },
+    [players, logUserAction, swapQueuePlayers],
+  );
 
   const renderBulkModal = () => (
     <div className="modal-backdrop" role="presentation">
@@ -1663,6 +1799,17 @@ export default function App() {
           </button>
         </div>
 
+        <div className="settings-danger-zone">
+          <p>
+            <strong>All clear today</strong> clears courts, zeros today’s W/L and games for
+            everyone still listed, and clears standby order. Saved profile rows in the database are
+            unchanged.
+          </p>
+          <button className="ghost-button danger" type="button" onClick={() => void clearAllTodaySession()}>
+            All clear today
+          </button>
+        </div>
+
         <div className="storage-status">
           <Database size={16} />
           <span>{saveStatus}</span>
@@ -1716,6 +1863,60 @@ export default function App() {
           </p>
         )}
 
+        {isLockedPublicView ? (
+          <section className="panel">
+            <div className="panel-title">
+              <UsersRound />
+              <h2>Find your spot with phone</h2>
+            </div>
+            <p className="hint">
+              Use the same digits you gave at check-in. Your place is stored on this device after
+              lookup.
+            </p>
+            <label className="register-field">
+              Phone
+              <input
+                value={publicPhoneInput}
+                onChange={(event) => {
+                  setPublicPhoneInput(event.target.value);
+                  setPublicLookupMessage('');
+                }}
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="Digits only"
+              />
+            </label>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => {
+                const digits = normalizePhoneDigits(publicPhoneInput);
+                if (!digits) {
+                  setPublicLookupMessage('Enter a phone number.');
+                  return;
+                }
+                const found = players.find((pl) => normalizePhoneDigits(pl.phone) === digits);
+                if (!found) {
+                  setPublicLookupMessage('Not on today’s list. Register or ask staff.');
+                  return;
+                }
+                localStorage.setItem(
+                  DEVICE_REGISTRATION_KEY,
+                  JSON.stringify({ playerId: found.id, sessionDate }),
+                );
+                setPublicLookupMessage('Saved on this device — scroll to “You”.');
+              }}
+            >
+              Show my place
+            </button>
+            {publicLookupMessage ? (
+              <p className="hint" role="status">
+                {publicLookupMessage}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
         {myPlayer ? (
           <section className="panel you-panel">
             <div className="panel-title">
@@ -1736,11 +1937,8 @@ export default function App() {
                 ) : null}
                 {rankingOnPublic && todayRankIndex >= 0 ? (
                   <small>
-                    Today&apos;s ranking: #{todayRankIndex + 1} · {sessionScoreLabel(myPlayer)}
+                    Today&apos;s ranking: #{todayRankIndex + 1} · {sessionDayRecordLabel(myPlayer)}
                   </small>
-                ) : null}
-                {rankingOnPublic ? (
-                  <small>Overall: {overallRecordLabel(myPlayer, savedPlayers)}</small>
                 ) : null}
               </article>
             </div>
@@ -1760,12 +1958,12 @@ export default function App() {
           <div className="public-list">
             {nextGroups.length > 0 ? (
               <article className="public-card">
-                <strong>Next groups (2)</strong>
+                <strong>Standby groups (up to 4)</strong>
                 <span>
                   {nextGroups.map((group, index) => (
                     <span key={group.id}>
                       #{index + 1}:{' '}
-                      {group.players.map((player) => player.name).join(', ')}
+                      {group.players.map((player) => player.name).join(', ') || '—'}
                       {index === nextGroups.length - 1 ? '' : ' · '}
                     </span>
                   ))}
@@ -1780,7 +1978,7 @@ export default function App() {
                   #{index + 1} {player.name}
                 </strong>
                 <span>In line (FIFO)</span>
-                {rankingOnPublic ? <small>{sessionScoreLabel(player)}</small> : null}
+                {rankingOnPublic ? <small>{sessionDayRecordLabel(player)}</small> : null}
               </article>
             ))}
 
@@ -1798,8 +1996,8 @@ export default function App() {
           <div className="public-list">
             {courts.map((court) => {
               const elapsedSeconds = getElapsedSeconds(court.match, now);
-              const topNames = court.match?.players.slice(0, 2).map((player) => player.name).join(', ');
-              const bottomNames = court.match?.players.slice(2, 4).map((player) => player.name).join(', ');
+              const fourNames =
+                court.match?.players.map((player) => player.name).join(' · ') || '';
               const emptyCourtLabel =
                 court.status === 'reserved' || court.status === 'unavailable'
                   ? court.status
@@ -1810,12 +2008,7 @@ export default function App() {
                   <strong>{court.name}</strong>
                   {court.match ? (
                     <div className="public-court-teams">
-                      <span>
-                        Top: {topNames || '—'}
-                      </span>
-                      <span>
-                        Bottom: {bottomNames || '—'}
-                      </span>
+                      <span>{fourNames || '—'}</span>
                     </div>
                   ) : (
                     <span>{emptyCourtLabel}</span>
@@ -1838,9 +2031,11 @@ export default function App() {
     const rowsToday = standingsRowsToday;
     const rowsOverall = standingsRowsOverall;
 
+    const showOverallTab = !isLockedPublicView;
+
     return (
       <section className="player-view standings-view">
-        {isLockedPublicView && showPublicRanking ? (
+        {showOverallTab && showPublicRanking ? (
           <div className="public-nav view-toggle standings-subtoggle">
             <button
               className={publicStandingsScope === 'today' ? 'primary-button' : 'ghost-button'}
@@ -1862,7 +2057,9 @@ export default function App() {
           <div className="panel-title">
             <Trophy />
             <h2>
-              {isToday ? 'Standings — today’s session' : 'Standings — overall (saved profiles)'}
+              {isToday || isLockedPublicView
+                ? 'Standings — today’s session'
+                : 'Standings — overall (saved profiles)'}
             </h2>
           </div>
           <div className="standings-table-wrap">
@@ -1873,18 +2070,18 @@ export default function App() {
                   <th>Name</th>
                   <th>W</th>
                   <th>L</th>
-                  <th>Rank score</th>
+                  <th>{isToday || isLockedPublicView ? 'Games today' : 'Rank score'}</th>
                 </tr>
               </thead>
               <tbody>
-                {isToday
+                {isToday || isLockedPublicView
                   ? rowsToday.map((player, index) => (
                       <tr key={player.id}>
                         <td>{index + 1}</td>
                         <td>{player.name}</td>
                         <td>{player.wins}</td>
                         <td>{player.losses}</td>
-                        <td>{player.rankingScore}</td>
+                        <td>{player.gamesPlayed}</td>
                       </tr>
                     ))
                   : rowsOverall.map((player, index) => (
@@ -1898,10 +2095,10 @@ export default function App() {
                     ))}
               </tbody>
             </table>
-            {isToday && !rowsToday.length && (
+            {(isToday || isLockedPublicView) && !rowsToday.length && (
               <p className="hint">No players in today&apos;s session yet.</p>
             )}
-            {!isToday && !rowsOverall.length && (
+            {showOverallTab && !isToday && !rowsOverall.length && (
               <p className="hint">No saved profiles yet.</p>
             )}
           </div>
@@ -1918,8 +2115,8 @@ export default function App() {
             <span className="eyebrow">Self check-in</span>
             <h1>Register for today&apos;s game</h1>
             <p>
-              Add yourself to the queue for {sessionDate}. Optional phone links you to an existing
-              profile and helps avoid duplicates.
+              Add yourself to the queue for {sessionDate}. Add your phone so you can find your
+              place on the public queue link and so staff can match your profile.
             </p>
           </div>
         </section>
@@ -1947,11 +2144,11 @@ export default function App() {
             </select>
           </label>
           <label className="register-field">
-            Phone (optional)
+            Phone
             <input
               value={registerPhone}
               onChange={(event) => setRegisterPhone(event.target.value)}
-              placeholder="For your device + duplicate check"
+              placeholder="Digits — used on the queue view and to avoid dupes"
               inputMode="tel"
               autoComplete="tel"
             />
@@ -1975,9 +2172,7 @@ export default function App() {
             </a>
           </div>
         </section>
-        <footer className="app-footer">
-          Built for CamSur PickleBall Club Open Club by Dev.Onich
-        </footer>
+        <footer className="app-footer">{BRAND_FOOTER}</footer>
       </main>
     );
   }
@@ -2018,9 +2213,7 @@ export default function App() {
           ) : null}
         </div>
         {publicPage === 'standings' && showPublicRanking ? renderStandingsView() : renderPlayerView()}
-        <footer className="app-footer">
-          Built for CamSur PickleBall Club Open Club by Dev.Onich
-        </footer>
+        <footer className="app-footer">{BRAND_FOOTER}</footer>
       </main>
     );
   }
@@ -2057,9 +2250,7 @@ export default function App() {
             Unlock admin board
           </button>
         </section>
-        <footer className="app-footer">
-          Built for CamSur PickleBall Club Open Club by Dev.Onich
-        </footer>
+        <footer className="app-footer">{BRAND_FOOTER}</footer>
       </main>
     );
   }
@@ -2079,9 +2270,12 @@ export default function App() {
         <div>
           <span className="eyebrow">Admin open play manager</span>
           <h1>OpenQueue</h1>
+          <p className="hero-brand-line">
+            {BRAND_FOOTER}
+          </p>
           <p>
-            Open Play for {sessionDate}. Courts first, then auto-assign, then the
-            waiting queue. Player view is shareable by link.
+            Open play for {sessionDate}. Add players, build groups in standby, then drag a full
+            foursome to a free ready court. Share the player link for the live list.
           </p>
         </div>
         <div className="hero-stats">
@@ -2162,6 +2356,104 @@ export default function App() {
               <button className="ghost-button" type="button" onClick={lockAdmin}>
                 Lock admin
               </button>
+            </div>
+          </section>
+
+          <section
+            className="panel queue-panel"
+            onDrop={handleQueueDrop}
+            onDragOver={(event) => event.preventDefault()}
+          >
+            <div className="panel-title">
+              <UsersRound />
+              <h2>Standby queue</h2>
+            </div>
+            <p className="hint">
+              Four standby slots (fill with four players each). Drag a full group to a free ready
+              court; the timer starts when the group lands. Drag a player onto another waiting
+              player to swap order and regroup.
+            </p>
+
+            <div className="queue-grid">
+              {queueGroups.map((group) => {
+                const canUseSelectedCourt =
+                  Boolean(selectedCourt) &&
+                  group.compatibleCourtIds.includes(selectedCourtId) &&
+                  group.playerIds.length === 4;
+                const isFull = group.playerIds.length === 4;
+
+                return (
+                  <article
+                    className={groupClassName(canUseSelectedCourt)}
+                    draggable={isFull}
+                    key={group.id}
+                    onDragStart={(event) => {
+                      if (!isFull) {
+                        return;
+                      }
+                      handleDragStart(event, {
+                        type: 'group',
+                        groupId: group.id,
+                        playerIds: group.playerIds,
+                      });
+                    }}
+                  >
+                    <div className="queue-card-header">
+                      <span>
+                        <GripVertical size={16} />
+                        {isFull ? 'Group of 4' : 'Open slot'}
+                      </span>
+                      <small>
+                        {group.players.length
+                          ? `Avg L${group.averageLevel.toFixed(1)}`
+                          : 'Add players from the list below'}
+                      </small>
+                    </div>
+                    <div className="player-stack">
+                      {group.players.length === 0 ? (
+                        <p className="hint">—</p>
+                      ) : (
+                        group.players.map((player) => (
+                          <div
+                            className="player-chip"
+                            draggable
+                            key={player.id}
+                            onDragStart={(event) =>
+                              handleDragStart(event, {
+                                type: 'player',
+                                playerId: player.id,
+                              })
+                            }
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={(event) => handleStandbyPlayerDrop(event, player.id)}
+                          >
+                            <span>
+                              {player.name}
+                              <small>{sessionDayRecordLabel(player)}</small>
+                            </span>
+                            <span
+                              className="color-dot"
+                              style={{
+                                background: player.gripColor || '#94a3b8',
+                              }}
+                            />
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <div className="compatibility-list">
+                      Can play:{' '}
+                      {group.compatibleCourtIds.length
+                        ? group.compatibleCourtIds
+                            .map((courtId) =>
+                              courts.find((court) => court.id === courtId)?.name,
+                            )
+                            .join(', ')
+                        : '—'}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </section>
 
@@ -2316,145 +2608,13 @@ export default function App() {
                       <span className="kitchen-line bottom" aria-hidden="true" />
                       <div className="drop-zone">
                         <CheckCircle2 />
-                        Drop group here or use auto assign
+                        Drop a full group here (ready court)
                       </div>
                     </div>
                   )}
                 </article>
               );
             })}
-          </section>
-
-          <section className="panel suggestions-panel">
-            <div className="panel-title">
-              <ArrowDownUp />
-              <h2>Automatic Assignments</h2>
-            </div>
-            <div className="suggestion-list">
-              {autoAssignments.map((assignment) => (
-                <button
-                  className="suggestion-card"
-                  key={`${assignment.court.id}-${assignment.group.id}`}
-                  onClick={() => autoAssignGroup(assignment)}
-                >
-                  <strong>{assignment.court.name}</strong>
-                  <span>
-                    {assignment.group.players
-                      .map((player) => `${player.name} (L${player.level})`)
-                      .join(', ')}
-                  </span>
-                </button>
-              ))}
-              {!autoAssignments.length && (
-                <p className="hint">No ready court currently matches a full group.</p>
-              )}
-            </div>
-          </section>
-
-          <section
-            className="panel queue-panel"
-            onDrop={handleQueueDrop}
-            onDragOver={(event) => event.preventDefault()}
-          >
-            <div className="panel-title">
-              <UsersRound />
-              <h2>Standby Queue</h2>
-            </div>
-            <p className="hint">
-              Winners receive a higher wait priority when they return. Drag a
-              four-player group to a court, or use a suggested assignment.
-            </p>
-
-            {waitingPlayers.length > 0 && waitingPlayers.length < 4 && (
-              <p className="hint">
-                Waiting players: {waitingPlayers.length}. Need at least 4 waiting players to form a
-                standby group.
-              </p>
-            )}
-
-            <div className="queue-grid">
-              {queueGroups.map((group) => {
-                const canUseSelectedCourt =
-                  Boolean(selectedCourt) &&
-                  group.compatibleCourtIds.includes(selectedCourtId);
-
-                return (
-                  <article
-                    className={groupClassName(canUseSelectedCourt)}
-                    draggable
-                    key={group.id}
-                    onDragStart={(event) =>
-                      handleDragStart(event, {
-                        type: 'group',
-                        groupId: group.id,
-                        playerIds: group.playerIds,
-                      })
-                    }
-                  >
-                    <div className="queue-card-header">
-                      <span>
-                        <GripVertical size={16} />
-                        Group of 4
-                      </span>
-                      <small>Avg L{group.averageLevel.toFixed(1)}</small>
-                    </div>
-                    <div className="player-stack">
-                      {group.players.map((player) => (
-                        <div
-                          className="player-chip"
-                          draggable
-                          key={player.id}
-                          onDragStart={(event) =>
-                            handleDragStart(event, {
-                              type: 'player',
-                              playerId: player.id,
-                            })
-                          }
-                        >
-                          <span>
-                            {player.name}
-                            <small>{sessionScoreLabel(player)}</small>
-                          </span>
-                          <span
-                            className="color-dot"
-                            style={{
-                              background: player.gripColor || '#94a3b8',
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="compatibility-list">
-                      Can play:{' '}
-                      {group.compatibleCourtIds.length
-                        ? group.compatibleCourtIds
-                            .map((courtId) =>
-                              courts.find((court) => court.id === courtId)?.name,
-                            )
-                            .join(', ')
-                        : 'No court fits'}
-                    </div>
-                  </article>
-                );
-              })}
-
-              {!queueGroups.length && (
-                <div className="empty-state">
-                  {waitingPlayers.length < 4
-                    ? 'Add at least four waiting players to form the first group.'
-                    : 'No groups can be formed right now.'}
-                  {waitingPlayers.length > 0 && waitingPlayers.length < 4 ? (
-                    <div className="waiting-preview">
-                      {waitingPlayers.map((player) => (
-                        <span className="waiting-chip" key={player.id}>
-                          {player.name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
           </section>
 
           <section className="panel player-table-panel">
@@ -2492,13 +2652,11 @@ export default function App() {
                         <select
                           value={player.arrivalStatus}
                           title={
-                            player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing'
-                              ? 'Use courts to finish the match or change assignment.'
-                              : undefined
+                            player.arrivalStatus === 'playing'
+                              ? 'Status is locked while the player is in an active match.'
+                              : 'Change freely while the player is not on court.'
                           }
-                          disabled={
-                            player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing'
-                          }
+                          disabled={player.arrivalStatus === 'playing'}
                           onChange={(event) =>
                             onPlayerFieldChange(player.id, 'arrivalStatus', {
                               arrivalStatus: event.target.value as Player['arrivalStatus'],
@@ -2581,12 +2739,7 @@ export default function App() {
                         />
                       </td>
                       <td className="record-cell">
-                        <div className="record-line">
-                          <small>Today</small> {sessionScoreLabel(player)}
-                        </div>
-                        <div className="record-line">
-                          <small>Overall</small> {overallRecordLabel(player, savedPlayers)}
-                        </div>
+                        {sessionDayRecordLabel(player)}
                       </td>
                       <td>
                         <button
@@ -2618,13 +2771,11 @@ export default function App() {
                         <select
                           value={player.arrivalStatus}
                           title={
-                            player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing'
-                              ? 'Use courts to finish the match or change assignment.'
-                              : undefined
+                            player.arrivalStatus === 'playing'
+                              ? 'Status is locked while the player is in an active match.'
+                              : 'Change freely while the player is not on court.'
                           }
-                          disabled={
-                            player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing'
-                          }
+                          disabled={player.arrivalStatus === 'playing'}
                           onChange={(event) =>
                             onPlayerFieldChange(player.id, 'arrivalStatus', {
                               arrivalStatus: event.target.value as Player['arrivalStatus'],
@@ -2707,12 +2858,7 @@ export default function App() {
                         />
                       </td>
                       <td className="record-cell">
-                        <div className="record-line">
-                          <small>Today</small> {sessionScoreLabel(player)}
-                        </div>
-                        <div className="record-line">
-                          <small>Overall</small> {overallRecordLabel(player, savedPlayers)}
-                        </div>
+                        {sessionDayRecordLabel(player)}
                       </td>
                       <td>—</td>
                     </tr>
@@ -2724,9 +2870,7 @@ export default function App() {
           </section>
         </section>
       )}
-      <footer className="app-footer">
-        Built for CamSur PickleBall Club Open Club by Dev.Onich
-      </footer>
+      <footer className="app-footer">{BRAND_FOOTER}</footer>
     </main>
   );
 }

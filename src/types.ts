@@ -123,4 +123,6 @@ export interface AppData {
   savedGripColors: string[];
   /** When false, public links hide standings and scoring on the queue. */
   showPublicRanking: boolean;
+  /** Order of waiting player ids for standby groups (drag reorder / swap). */
+  queuePlayerOrder: string[];
 }

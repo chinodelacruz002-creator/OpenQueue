@@ -1,10 +1,25 @@
-import type { AutoAssignment, Court, Match, Player, QueueGroup } from './types';
+import type { Court, Match, Player, QueueGroup } from './types';
 
 const GROUP_SIZE = 4;
+
+/** Admin standby area always shows this many group cards (empty slots are padded). */
+export const STANDBY_GROUP_SLOT_COUNT = 4;
 
 export const getAvailablePlayers = (players: Player[]): Player[] =>
   players
     .filter((player) => player.arrivalStatus === 'present');
+
+const createEmptyStandbyGroup = (courts: Court[], slotIndex: number): QueueGroup => ({
+  id: `standby-empty-${slotIndex}`,
+  playerIds: [],
+  players: [],
+  averageLevel: 0,
+  minLevel: 1,
+  maxLevel: 4,
+  compatibleCourtIds: courts.map((court) => court.id),
+  priorityScore: 0,
+  reason: 'Empty slot — add players from the list below',
+});
 
 export const createGroupsFromAvailablePlayers = (
   players: Player[],
@@ -51,34 +66,13 @@ export const createGroupsFromAvailablePlayers = (
     }
   }
 
-  return groups;
-};
+  let slot = 0;
+  while (groups.length < STANDBY_GROUP_SLOT_COUNT) {
+    groups.push(createEmptyStandbyGroup(courts, slot));
+    slot += 1;
+  }
 
-export const buildAutoAssignments = (
-  courts: Court[],
-  queueGroups: QueueGroup[],
-): AutoAssignment[] => {
-  const usedGroupIds = new Set<string>();
-
-  return courts.reduce<AutoAssignment[]>((assignments, court) => {
-    if (court.status !== 'ready' || court.match) {
-      return assignments;
-    }
-
-    const group = queueGroups.find(
-      (candidate) =>
-        !usedGroupIds.has(candidate.id) &&
-        candidate.compatibleCourtIds.includes(court.id),
-    );
-
-    if (!group) {
-      return assignments;
-    }
-
-    usedGroupIds.add(group.id);
-    assignments.push({ court, group });
-    return assignments;
-  }, []);
+  return groups.slice(0, STANDBY_GROUP_SLOT_COUNT);
 };
 
 export const getElapsedSeconds = (match: Match | null, now: number): number => {

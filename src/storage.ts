@@ -1,12 +1,8 @@
-<<<<<<< HEAD
-import { logOpenQueueAction } from './actionLog';
-import { LOCAL_STORAGE_KEY, normalizePhoneDigits } from './constants';
-=======
 import {
   LOCAL_STORAGE_KEY,
   SUPABASE_MIRROR_STORAGE_KEY,
+  normalizePhoneDigits,
 } from './constants';
->>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
 import type { AppData, Court, Player, SavedPlayer } from './types';
 import { hasSupabaseConfig, supabase } from './utils/supabase';
 
@@ -37,6 +33,7 @@ interface OpenPlayStateRow {
   saved_paddles: string[];
   saved_grip_colors: string[];
   show_public_ranking?: boolean | null;
+  queue_player_order?: string[] | null;
   updated_at: string;
 }
 
@@ -82,6 +79,7 @@ export const migrateAppData = (data: AppData): AppData => ({
   maxMinutes: data.maxMinutes ?? 15,
   savedPaddles: data.savedPaddles ?? [],
   savedGripColors: data.savedGripColors ?? [],
+  queuePlayerOrder: data.queuePlayerOrder ?? [],
 });
 
 const phoneConflictInSession = (players: Player[], digits: string, excludeId?: string): boolean => {
@@ -282,32 +280,17 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
   }
 
   if (stateError || !stateRow) {
-<<<<<<< HEAD
-    return migrateAppData({
-=======
-    const fallback: AppData = {
->>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
+    const fallback: AppData = migrateAppData({
       sessionDate: getTodayKey(),
       players: [],
       courts: [],
       maxMinutes: 15,
       savedPlayers,
-<<<<<<< HEAD
-      savedPaddles: uniqueValues([
-        ...playerRows.map((row) => row.paddle),
-      ]),
-      savedGripColors: uniqueValues([
-        ...playerRows.map((row) => row.grip_color),
-      ]),
-      showPublicRanking: true,
-    });
-  }
-
-  return migrateAppData({
-=======
       savedPaddles: uniqueValues([...playerRows.map((row) => row.paddle)]),
       savedGripColors: uniqueValues([...playerRows.map((row) => row.grip_color)]),
-    };
+      showPublicRanking: true,
+      queuePlayerOrder: [],
+    });
     const syncedGen = nextMirrorGeneration();
     writeMirrorEnvelope({
       v: MIRROR_VERSION,
@@ -319,8 +302,7 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
     return fallback;
   }
 
-  const merged: AppData = {
->>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
+  const merged: AppData = migrateAppData({
     sessionDate: stateRow.session_date,
     players: stateRow.players ?? [],
     courts: stateRow.courts ?? [],
@@ -334,11 +316,9 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
       ...(stateRow.saved_grip_colors ?? []),
       ...playerRows.map((row) => row.grip_color),
     ]),
-<<<<<<< HEAD
     showPublicRanking: stateRow.show_public_ranking !== false,
+    queuePlayerOrder: stateRow.queue_player_order ?? [],
   });
-=======
-  };
 
   const syncedGen = nextMirrorGeneration();
   const envelope: MirrorEnvelope = {
@@ -372,7 +352,6 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
   })();
 
   return loadOpenPlayInFlight;
->>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
 };
 
 export const saveOpenPlayData = async (data: AppData): Promise<void> => {
@@ -383,19 +362,6 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
 
   const [playersResult, stateResult] = await Promise.all([
     supabase.from('players').upsert(data.savedPlayers.map(mapSavedPlayerToRow)),
-<<<<<<< HEAD
-    supabase.from('open_play_state').upsert({
-      id: OPEN_PLAY_STATE_ID,
-      session_date: data.sessionDate,
-      players: data.players,
-      courts: data.courts,
-      max_minutes: data.maxMinutes,
-      saved_paddles: data.savedPaddles,
-      saved_grip_colors: data.savedGripColors,
-      show_public_ranking: data.showPublicRanking,
-      updated_at: new Date().toISOString(),
-    }),
-=======
     supabase
       .from('open_play_state')
       .upsert({
@@ -406,11 +372,12 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
         max_minutes: data.maxMinutes,
         saved_paddles: data.savedPaddles,
         saved_grip_colors: data.savedGripColors,
+        show_public_ranking: data.showPublicRanking,
+        queue_player_order: data.queuePlayerOrder,
         updated_at: new Date().toISOString(),
       })
       .select('updated_at')
       .single(),
->>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
   ]);
 
   const errors = [playersResult.error, stateResult.error].filter(
@@ -518,34 +485,3 @@ const uniqueValues = (values: string[]): string[] =>
   Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort(
     (first, second) => first.localeCompare(second),
   );
-
-<<<<<<< HEAD
-/**
- * Fires when `open_play_state` changes in Supabase (requires table in the `supabase_realtime` publication).
- */
-export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) => {
-  if (!supabase) {
-    return () => {
-      // No-op: Realtime is unavailable without a client.
-    };
-  }
-
-  const client = supabase;
-  const channel = client
-    .channel('open_play_state_changes')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'open_play_state' },
-      () => {
-        onChange();
-      },
-    )
-    .subscribe();
-
-  return () => {
-    void client.removeChannel(channel);
-  };
-};
-=======
-const getTodayKey = (): string => new Date().toISOString().slice(0, 10);
->>>>>>> e44fe25d899df8141753ed489b7742252552ec7c

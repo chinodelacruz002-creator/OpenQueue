@@ -72,6 +72,7 @@ create table open_play_state (
   saved_paddles text[] not null default '{}',
   saved_grip_colors text[] not null default '{}',
   show_public_ranking boolean not null default true,
+  queue_player_order text[] not null default '{}',
   updated_at timestamptz not null default now()
 );
 ```
@@ -81,6 +82,7 @@ If you already created these tables, add the new columns:
 ```sql
 alter table players add column if not exists phone text not null default '';
 alter table open_play_state add column if not exists show_public_ranking boolean not null default true;
+alter table open_play_state add column if not exists queue_player_order text[] not null default '{}';
 ```
 
 For a public no-login deployment, enable Row Level Security and add public
