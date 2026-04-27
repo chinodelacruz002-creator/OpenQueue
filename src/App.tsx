@@ -303,9 +303,9 @@ export default function App() {
     [buildAppData],
   );
 
-  useEffect(() => {
-    flushSaveRef.current = flushSave;
-  }, [flushSave]);
+  // Keep this ref in sync during render so timers never call a stale save closure.
+  // eslint-disable-next-line react-hooks/refs -- useEffect runs after paint; setTimeout(0) can fire first and would call a stale flushSave without this.
+  flushSaveRef.current = flushSave;
 
   /** Run persist after React applies batched state from the current event (avoids stale saves). */
   const schedulePersistAfterMutation = useCallback((saveTrigger: string) => {
