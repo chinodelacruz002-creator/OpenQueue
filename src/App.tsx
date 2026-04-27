@@ -64,8 +64,7 @@ import './styles.css';
 const DEFAULT_COURTS = 4;
 const DEFAULT_MAX_MINUTES = 15;
 const SAVE_DEBOUNCE_MS = 500;
-const BRAND_FOOTER =
-  'Beta Version | Dev in Progress | Open Play Queue for Camsur Pickleball Club by Dev.Onich';
+const BRAND_FOOTER = 'OpenQueue · Camsur Pickleball Club';
 
 const normalizePlayerName = (name: string) => name.trim().toLowerCase();
 
@@ -2565,23 +2564,19 @@ export default function App() {
     <main className="app-shell">
       {isBulkModalOpen && renderBulkModal()}
       {isSettingsModalOpen && renderSettingsModal()}
-      {!hasSupabaseConfig && (
+      {import.meta.env.DEV && !hasSupabaseConfig ? (
         <div className="local-only-banner" role="status">
-          Not connected to Supabase at build time. Data is only saved in this browser. Add
-          <code> VITE_SUPABASE_URL</code> and <code> VITE_SUPABASE_PUBLISHABLE_KEY</code> to
-          GitHub Actions secrets for a shared live site.
+          Dev: no Supabase env — data stays in this browser only. Configure env for production
+          deploys.
         </div>
-      )}
+      ) : null}
       <section className="hero">
         <div>
           <span className="eyebrow">Admin open play manager</span>
           <h1>OpenQueue</h1>
-          <p className="hero-brand-line">
-            {BRAND_FOOTER}
-          </p>
           <p>
-            Open play for {sessionDate}. Add players, build groups in standby, then drag a full
-            foursome to a free ready court. Share the player link for the live list.
+            Session {sessionDate}. Manage the queue, standby groups, and courts — share the player
+            link for live check-in and the public list.
           </p>
         </div>
         <div className="hero-stats">

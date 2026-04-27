@@ -227,10 +227,6 @@ button {
   font-size: clamp(1.8rem, 4vw, 2.6rem);
 }
 
-.public-kiosk-status {
-  display: none;
-}
-
 .public-nav {
   display: flex;
   justify-content: center;
@@ -749,7 +745,7 @@ select {
   flex: 0 0 0.8rem;
   width: 0.8rem;
   height: 0.8rem;
-  border: 1px solid rgba(15, 23, 42, 0.2);
+  border: 1px solid hsl(var(--foreground) / 0.2);
   border-radius: 999px;
 }
 
