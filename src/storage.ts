@@ -228,6 +228,9 @@ const writeMirrorEnvelope = (envelope: MirrorEnvelope): void => {
   }
 };
 
+const appDataJsonEqual = (a: AppData, b: AppData): boolean =>
+  JSON.stringify(migrateAppData(a)) === JSON.stringify(migrateAppData(b));
+
 const nextMirrorGeneration = (): number => {
   const prev = readMirrorEnvelope();
   return Math.max(prev?.persistenceGen ?? 0, prev?.savedGen ?? 0) + 1;
@@ -262,6 +265,11 @@ export const writeOptimisticMirror = (data: AppData): void => {
 /**
  * Update mirror `app` without bumping `persistenceGen` (unlike `writeOptimisticMirror`).
  * @param fromServer - when true, this snapshot came from the network (`applyLoad`); clears clientDirty.
+ *
+ * If we set `clientDirty: true` on every local layout, any re-render (e.g. 1s clock) would mark the
+ * session dirty with identical data, block all fetches, and both tabs would stay on stale/empty
+ * data forever. Only mark dirty when the app snapshot **actually** changed; otherwise keep the
+ * previous `clientDirty` flag.
  */
 export const syncMirrorToApp = (data: AppData, fromServer = false): void => {
   const app = migrateAppData(data);
@@ -277,10 +285,16 @@ export const syncMirrorToApp = (data: AppData, fromServer = false): void => {
     });
     return;
   }
+  const same = appDataJsonEqual(app, prev.app);
+  const nextClientDirty: boolean = fromServer
+    ? false
+    : same
+      ? Boolean(prev.clientDirty)
+      : true;
   writeMirrorEnvelope({
     ...prev,
     app,
-    clientDirty: fromServer ? false : true,
+    clientDirty: nextClientDirty,
   });
 };
 
@@ -327,7 +341,18 @@ const fetchOpenPlayFromSupabase = async (preferNetwork = false): Promise<AppData
     return migrateAppData(mirrorAfterFetch.app);
   }
 
-  if (stateError || !stateRow) {
+  /** Do not build an "empty" session or wipe the mirror if the row read failed (RLS, etc.). */
+  if (stateError) {
+    if (mirrorAfterFetch) {
+      return migrateAppData(mirrorAfterFetch.app);
+    }
+    if (mirrorBeforeFetch) {
+      return migrateAppData(mirrorBeforeFetch.app);
+    }
+    return null;
+  }
+
+  if (!stateRow) {
     const fallback: AppData = migrateAppData({
       sessionDate: getTodayKey(),
       players: [],
@@ -519,7 +544,7 @@ const saveLocalData = (data: AppData): void => {
 };
 
 /**
- * Fires when `open_play_state` changes in Supabase (requires table in the `supabase_realtime` publication).
+ * Fires when `open_play_state` or `players` change (add both tables to the `supabase_realtime` publication).
  */
 export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) => {
   if (!supabase) {
@@ -534,6 +559,13 @@ export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) =>
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'open_play_state' },
+      () => {
+        onChange();
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'players' },
       () => {
         onChange();
       },
