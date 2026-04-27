@@ -1,5 +1,12 @@
+<<<<<<< HEAD
 import { logOpenQueueAction } from './actionLog';
 import { LOCAL_STORAGE_KEY, normalizePhoneDigits } from './constants';
+=======
+import {
+  LOCAL_STORAGE_KEY,
+  SUPABASE_MIRROR_STORAGE_KEY,
+} from './constants';
+>>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
 import type { AppData, Court, Player, SavedPlayer } from './types';
 import { hasSupabaseConfig, supabase } from './utils/supabase';
 
@@ -144,12 +151,104 @@ export const appendSelfRegisteredPlayer = async (
 
 const OPEN_PLAY_STATE_ID = 'current';
 
-export const loadOpenPlayData = async (): Promise<AppData | null> => {
+let loadOpenPlayInFlight: Promise<AppData | null> | null = null;
+
+const MIRROR_VERSION = 1 as const;
+
+interface MirrorEnvelope {
+  v: typeof MIRROR_VERSION;
+  app: AppData;
+  persistenceGen: number;
+  savedGen: number;
+  serverUpdatedAt: string | null;
+}
+
+const emptyEnvelope = (app: AppData): MirrorEnvelope => ({
+  v: MIRROR_VERSION,
+  app,
+  persistenceGen: 0,
+  savedGen: 0,
+  serverUpdatedAt: null,
+});
+
+const isAppDataShape = (value: unknown): value is AppData => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const o = value as Record<string, unknown>;
+  return typeof o.sessionDate === 'string' && Array.isArray(o.players) && Array.isArray(o.courts);
+};
+
+const readMirrorEnvelope = (): MirrorEnvelope | null => {
+  const raw = window.localStorage.getItem(SUPABASE_MIRROR_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === 'object' && 'v' in parsed && (parsed as MirrorEnvelope).v === MIRROR_VERSION) {
+      const env = parsed as MirrorEnvelope;
+      if (isAppDataShape(env.app)) {
+        return env;
+      }
+      return null;
+    }
+    if (isAppDataShape(parsed)) {
+      return emptyEnvelope(parsed);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const writeMirrorEnvelope = (envelope: MirrorEnvelope): void => {
+  try {
+    window.localStorage.setItem(SUPABASE_MIRROR_STORAGE_KEY, JSON.stringify(envelope));
+  } catch {
+    // Quota or private mode — ignore; network path still works.
+  }
+};
+
+const nextMirrorGeneration = (): number => {
+  const prev = readMirrorEnvelope();
+  return Math.max(prev?.persistenceGen ?? 0, prev?.savedGen ?? 0) + 1;
+};
+
+/** Exposed for tests / debugging; mirror is the source of truth for stale-fetch detection. */
+export const getPersistenceGenSnapshot = (): { persistenceGen: number; savedGen: number } => {
+  const env = readMirrorEnvelope();
+  return {
+    persistenceGen: env?.persistenceGen ?? 0,
+    savedGen: env?.savedGen ?? 0,
+  };
+};
+
+/**
+ * Writes the latest app snapshot to the local mirror immediately so a concurrent
+ * Supabase fetch cannot replace fresher UI state with an in-flight stale row.
+ */
+export const writeOptimisticMirror = (data: AppData): void => {
+  const prev = readMirrorEnvelope();
+  const next: MirrorEnvelope = {
+    v: MIRROR_VERSION,
+    app: data,
+    persistenceGen: nextMirrorGeneration(),
+    savedGen: prev?.savedGen ?? 0,
+    serverUpdatedAt: prev?.serverUpdatedAt ?? null,
+  };
+  writeMirrorEnvelope(next);
+};
+
+const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
   if (!supabase) {
-    return loadLocalData();
+    return null;
   }
 
-  clearLocalData();
+  const mirrorBeforeFetch = readMirrorEnvelope();
+  const hadPending = Boolean(
+    mirrorBeforeFetch && mirrorBeforeFetch.persistenceGen > mirrorBeforeFetch.savedGen,
+  );
 
   const { data: playerRows, error: playerError } = await supabase
     .from('players')
@@ -158,15 +257,7 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
     .order('name', { ascending: true });
 
   if (playerError) {
-    logOpenQueueAction({
-      category: 'data_load',
-      action: 'load_players',
-      trigger: 'storage.loadOpenPlayData',
-      status: 'failed',
-      persistence: 'supabase',
-      error: playerError.message,
-    });
-    return null;
+    return mirrorBeforeFetch?.app ?? null;
   }
 
   const { data: stateRow, error: stateError } = await supabase
@@ -177,13 +268,31 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
 
   const savedPlayers = playerRows.map(mapRowToSavedPlayer);
 
+  const serverTs = stateRow?.updated_at ?? null;
+
+  if (hadPending && mirrorBeforeFetch) {
+    if (!serverTs || !mirrorBeforeFetch.serverUpdatedAt) {
+      return mirrorBeforeFetch.app;
+    }
+    const serverTime = new Date(serverTs).getTime();
+    const mirrorTime = new Date(mirrorBeforeFetch.serverUpdatedAt).getTime();
+    if (serverTime <= mirrorTime) {
+      return mirrorBeforeFetch.app;
+    }
+  }
+
   if (stateError || !stateRow) {
+<<<<<<< HEAD
     return migrateAppData({
+=======
+    const fallback: AppData = {
+>>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
       sessionDate: getTodayKey(),
       players: [],
       courts: [],
       maxMinutes: 15,
       savedPlayers,
+<<<<<<< HEAD
       savedPaddles: uniqueValues([
         ...playerRows.map((row) => row.paddle),
       ]),
@@ -195,6 +304,23 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
   }
 
   return migrateAppData({
+=======
+      savedPaddles: uniqueValues([...playerRows.map((row) => row.paddle)]),
+      savedGripColors: uniqueValues([...playerRows.map((row) => row.grip_color)]),
+    };
+    const syncedGen = nextMirrorGeneration();
+    writeMirrorEnvelope({
+      v: MIRROR_VERSION,
+      app: fallback,
+      persistenceGen: syncedGen,
+      savedGen: syncedGen,
+      serverUpdatedAt: serverTs,
+    });
+    return fallback;
+  }
+
+  const merged: AppData = {
+>>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
     sessionDate: stateRow.session_date,
     players: stateRow.players ?? [],
     courts: stateRow.courts ?? [],
@@ -208,8 +334,45 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
       ...(stateRow.saved_grip_colors ?? []),
       ...playerRows.map((row) => row.grip_color),
     ]),
+<<<<<<< HEAD
     showPublicRanking: stateRow.show_public_ranking !== false,
   });
+=======
+  };
+
+  const syncedGen = nextMirrorGeneration();
+  const envelope: MirrorEnvelope = {
+    v: MIRROR_VERSION,
+    app: merged,
+    persistenceGen: syncedGen,
+    savedGen: syncedGen,
+    serverUpdatedAt: stateRow.updated_at ?? null,
+  };
+  writeMirrorEnvelope(envelope);
+  return merged;
+};
+
+export const loadOpenPlayData = async (): Promise<AppData | null> => {
+  if (!supabase) {
+    return loadLocalData();
+  }
+
+  if (loadOpenPlayInFlight) {
+    return loadOpenPlayInFlight;
+  }
+
+  loadOpenPlayInFlight = (async () => {
+    try {
+      return await fetchOpenPlayFromSupabase();
+    } catch {
+      return readMirrorEnvelope()?.app ?? null;
+    } finally {
+      loadOpenPlayInFlight = null;
+    }
+  })();
+
+  return loadOpenPlayInFlight;
+>>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
 };
 
 export const saveOpenPlayData = async (data: AppData): Promise<void> => {
@@ -218,10 +381,9 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
     return;
   }
 
-  clearLocalData();
-
   const [playersResult, stateResult] = await Promise.all([
     supabase.from('players').upsert(data.savedPlayers.map(mapSavedPlayerToRow)),
+<<<<<<< HEAD
     supabase.from('open_play_state').upsert({
       id: OPEN_PLAY_STATE_ID,
       session_date: data.sessionDate,
@@ -233,6 +395,22 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
       show_public_ranking: data.showPublicRanking,
       updated_at: new Date().toISOString(),
     }),
+=======
+    supabase
+      .from('open_play_state')
+      .upsert({
+        id: OPEN_PLAY_STATE_ID,
+        session_date: data.sessionDate,
+        players: data.players,
+        courts: data.courts,
+        max_minutes: data.maxMinutes,
+        saved_paddles: data.savedPaddles,
+        saved_grip_colors: data.savedGripColors,
+        updated_at: new Date().toISOString(),
+      })
+      .select('updated_at')
+      .single(),
+>>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
   ]);
 
   const errors = [playersResult.error, stateResult.error].filter(
@@ -240,20 +418,23 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
   );
   if (errors.length > 0) {
     const message = errors.map((e) => e.message).join('; ');
-    logOpenQueueAction({
-      category: 'persistence',
-      action: 'supabase_upsert',
-      trigger: 'storage.saveOpenPlayData',
-      status: 'failed',
-      persistence: 'supabase',
-      detail: {
-        playersError: playersResult.error?.message ?? null,
-        stateError: stateResult.error?.message ?? null,
-      },
-      error: message,
-    });
     throw new Error(message);
   }
+
+  const serverUpdatedAt =
+    stateResult.data && typeof stateResult.data === 'object' && 'updated_at' in stateResult.data
+      ? String((stateResult.data as { updated_at: string }).updated_at)
+      : new Date().toISOString();
+
+  const pending = readMirrorEnvelope();
+  const gen = pending?.persistenceGen ?? nextMirrorGeneration();
+  writeMirrorEnvelope({
+    v: MIRROR_VERSION,
+    app: data,
+    persistenceGen: gen,
+    savedGen: gen,
+    serverUpdatedAt,
+  });
 };
 
 const loadLocalData = (): AppData | null => {
@@ -274,8 +455,31 @@ const saveLocalData = (data: AppData): void => {
   window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
 };
 
-const clearLocalData = (): void => {
-  window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+/**
+ * Fires when `open_play_state` changes in Supabase (requires table in the `supabase_realtime` publication).
+ */
+export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) => {
+  if (!supabase) {
+    return () => {
+      // No-op: Realtime is unavailable without a client.
+    };
+  }
+
+  const client = supabase;
+  const channel = client
+    .channel('open_play_state_changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'open_play_state' },
+      () => {
+        onChange();
+      },
+    )
+    .subscribe();
+
+  return () => {
+    void client.removeChannel(channel);
+  };
 };
 
 const mapRowToSavedPlayer = (row: PlayerRow): SavedPlayer => ({
@@ -315,6 +519,7 @@ const uniqueValues = (values: string[]): string[] =>
     (first, second) => first.localeCompare(second),
   );
 
+<<<<<<< HEAD
 /**
  * Fires when `open_play_state` changes in Supabase (requires table in the `supabase_realtime` publication).
  */
@@ -341,3 +546,6 @@ export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) =>
     void client.removeChannel(channel);
   };
 };
+=======
+const getTodayKey = (): string => new Date().toISOString().slice(0, 10);
+>>>>>>> e44fe25d899df8141753ed489b7742252552ec7c

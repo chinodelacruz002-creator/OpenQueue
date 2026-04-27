@@ -28,6 +28,7 @@ export const GRIP_COLOR_OPTIONS = [
 
 export const LOCAL_STORAGE_KEY = 'openqueue-app-data';
 
+<<<<<<< HEAD
 /** localStorage: { playerId, sessionDate } after self-registration */
 export const DEVICE_REGISTRATION_KEY = 'openqueue_device_registration';
 
@@ -35,6 +36,10 @@ export const DEVICE_REGISTRATION_KEY = 'openqueue_device_registration';
 export const ADMIN_UNLOCK_KEY = 'openqueue_admin_unlocked';
 
 export const normalizePhoneDigits = (phone: string): string => phone.replace(/\D/g, '');
+=======
+/** Last good snapshot when using Supabase (offline fallback + instant re-read after save). */
+export const SUPABASE_MIRROR_STORAGE_KEY = 'openqueue-supabase-mirror';
+>>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
 
 export const getLevelRange = (level: number) => {
   if (level === 1) {

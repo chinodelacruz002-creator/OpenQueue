@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+<<<<<<< HEAD
 import {
   logOpenQueueAction,
   logUserInteraction,
@@ -26,6 +27,11 @@ import {
   getLevelRange,
   normalizePhoneDigits,
 } from './constants';
+=======
+import { flushSync } from 'react-dom';
+import { logUserInteraction, type UserActionLogStatus } from './actionLog';
+import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
+>>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
 import {
   buildAutoAssignments,
   createGroupsFromAvailablePlayers,
@@ -39,6 +45,7 @@ import {
   loadOpenPlayData,
   saveOpenPlayData,
   subscribeOpenPlayRealtime,
+  writeOptimisticMirror,
 } from './storage';
 import type {
   AppData,
@@ -296,6 +303,7 @@ export default function App() {
   const [bulkAddError, setBulkAddError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const savePromiseRef = useRef<Promise<void> | null>(null);
+  const flushSaveRef = useRef<(trigger?: string) => Promise<void>>(async () => {});
   const [now, setNow] = useState(0);
   const [showPublicRanking, setShowPublicRanking] = useState(true);
   const [adminUnlocked, setAdminUnlocked] = useState(
@@ -314,7 +322,7 @@ export default function App() {
     (
       action: string,
       trigger: string,
-      status: OpenQueueLogStatus,
+      status: UserActionLogStatus,
       options?: { detail?: Record<string, unknown>; throttleKey?: string },
     ) => {
       logUserInteraction(
@@ -357,53 +365,41 @@ export default function App() {
   const flushSave = useCallback(
     async (saveTrigger = 'debounced_state_change') => {
       if (isLockedPublicView) {
-        logOpenQueueAction({
-          category: 'persistence',
-          action: 'save_open_play',
-          trigger: saveTrigger,
-          status: 'skipped',
-          persistence: persistenceLabel(),
-          detail: { reason: 'locked_public_view' },
-        });
         return;
       }
 
-      if (savePromiseRef.current) {
-        await savePromiseRef.current;
-        return;
+      // User-triggered saves must not be dropped if another save is in flight; debounced saves
+      // bail after waiting so we do not duplicate writes for the same revision.
+      let pendingSave = savePromiseRef.current;
+      while (pendingSave) {
+        await pendingSave;
+        if (saveTrigger === 'debounced_state_change') {
+          return;
+        }
+        pendingSave = savePromiseRef.current;
       }
 
       setIsSaving(true);
-      logOpenQueueAction({
-        category: 'persistence',
-        action: 'save_open_play',
-        trigger: saveTrigger,
-        status: 'started',
-        persistence: persistenceLabel(),
-      });
 
-      const promise = saveOpenPlayData(buildAppData())
+      const snapshot = buildAppData();
+      writeOptimisticMirror(snapshot);
+
+      const promise = saveOpenPlayData(snapshot)
         .then(() => {
-          logOpenQueueAction({
-            category: 'persistence',
-            action: 'save_open_play',
-            trigger: saveTrigger,
-            status: 'success',
-            persistence: persistenceLabel(),
-          });
           setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
         })
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
-          logOpenQueueAction({
-            category: 'persistence',
-            action: 'save_open_play',
-            trigger: saveTrigger,
-            status: 'failed',
-            persistence: persistenceLabel(),
-            error: message,
-          });
           setSaveStatus('Save failed');
+          if (saveTrigger !== 'debounced_state_change') {
+            logUserInteraction({
+              action: 'save_open_play',
+              trigger: saveTrigger,
+              status: 'failed',
+              persistence: persistenceLabel(),
+              error: message,
+            });
+          }
         })
         .finally(() => {
           setIsSaving(false);
@@ -415,6 +411,25 @@ export default function App() {
     },
     [buildAppData],
   );
+
+  // Keep this ref in sync during render so timers never call a stale save closure.
+  // eslint-disable-next-line react-hooks/refs -- useEffect runs after paint; setTimeout(0) can fire first and would call a stale flushSave without this.
+  flushSaveRef.current = flushSave;
+
+  /** Run persist after React applies batched state from the current event (avoids stale saves). */
+  const schedulePersistAfterMutation = useCallback((saveTrigger: string) => {
+    queueMicrotask(() => {
+      void flushSaveRef.current(saveTrigger);
+    });
+  }, []);
+
+  /** Commit pending state synchronously, then persist on the next microtask (avoids stale buildAppData when saving right after setState). */
+  const persistAfterFlushSync = useCallback((saveTrigger: string, commit: () => void) => {
+    flushSync(commit);
+    queueMicrotask(() => {
+      void flushSaveRef.current(saveTrigger);
+    });
+  }, []);
 
   const goToViewMode = (mode: 'admin' | 'player') => {
     if (isLockedPublicView) {
@@ -546,25 +561,6 @@ export default function App() {
       if (!mounted) {
         return;
       }
-      if (data === null && hasSupabaseConfig) {
-        logOpenQueueAction({
-          category: 'data_load',
-          action: 'load_open_play',
-          trigger: 'app.initial_mount',
-          status: 'failed',
-          persistence: 'supabase',
-          error: 'loadOpenPlayData returned null',
-        });
-      } else {
-        logOpenQueueAction({
-          category: 'data_load',
-          action: 'load_open_play',
-          trigger: 'app.initial_mount',
-          status: 'success',
-          persistence: persistenceLabel(),
-          detail: { hasRemoteRow: Boolean(data) },
-        });
-      }
       applyLoad(data, 'initial');
     });
 
@@ -579,25 +575,6 @@ export default function App() {
     }
     return subscribeOpenPlayRealtime(() => {
       void loadOpenPlayData().then((data) => {
-        if (data === null && hasSupabaseConfig) {
-          logOpenQueueAction({
-            category: 'data_load',
-            action: 'load_open_play',
-            trigger: 'app.realtime_sync',
-            status: 'failed',
-            persistence: 'supabase',
-            error: 'loadOpenPlayData returned null',
-          });
-        } else {
-          logOpenQueueAction({
-            category: 'data_load',
-            action: 'load_open_play',
-            trigger: 'app.realtime_sync',
-            status: 'success',
-            persistence: persistenceLabel(),
-            detail: { hasRemoteRow: Boolean(data) },
-          });
-        }
         applyLoad(data, 'sync');
       });
     });
@@ -611,39 +588,12 @@ export default function App() {
     if (hasSupabaseConfig) {
       timer = window.setInterval(() => {
         void loadOpenPlayData().then((data) => {
-          if (data === null && hasSupabaseConfig) {
-            logOpenQueueAction({
-              category: 'data_load',
-              action: 'load_open_play',
-              trigger: 'app.interval_poll',
-              status: 'failed',
-              persistence: 'supabase',
-              error: 'loadOpenPlayData returned null',
-            });
-          } else {
-            logOpenQueueAction({
-              category: 'data_load',
-              action: 'load_open_play',
-              trigger: 'app.interval_poll',
-              status: 'success',
-              persistence: persistenceLabel(),
-              detail: { hasRemoteRow: Boolean(data) },
-            });
-          }
           applyLoad(data, 'sync');
         });
       }, 25000);
     } else if (needsPoll) {
       timer = window.setInterval(() => {
         void loadOpenPlayData().then((data) => {
-          logOpenQueueAction({
-            category: 'data_load',
-            action: 'load_open_play',
-            trigger: 'app.interval_poll_local',
-            status: 'success',
-            persistence: 'local',
-            detail: { hasRemoteRow: Boolean(data) },
-          });
           applyLoad(data, 'sync');
         });
       }, 5000);
@@ -802,7 +752,7 @@ export default function App() {
     setBulkRows(createBulkRows());
   };
 
-  const clearBulkRow = async (rowId: string) => {
+  const clearBulkRow = (rowId: string) => {
     if (isSaving) {
       logUserAction('bulk_clear_row', 'bulk_modal.clear_row', 'skipped', {
         detail: { rowId, reason: 'save_in_progress' },
@@ -810,15 +760,16 @@ export default function App() {
       return;
     }
     logUserAction('bulk_clear_row', 'bulk_modal.clear_row', 'applied', { detail: { rowId } });
-    setBulkRows((currentRows) =>
-      currentRows.map((row) =>
-        row.rowId === rowId ? { ...createBulkRow(), rowId: row.rowId } : row,
-      ),
-    );
-    await flushSave('bulk_clear_row');
+    persistAfterFlushSync('bulk_clear_row', () => {
+      setBulkRows((currentRows) =>
+        currentRows.map((row) =>
+          row.rowId === rowId ? { ...createBulkRow(), rowId: row.rowId } : row,
+        ),
+      );
+    });
   };
 
-  const handleBulkAdd = async () => {
+  const handleBulkAdd = () => {
     if (isSaving) {
       logUserAction('bulk_update_players', 'bulk_modal.update_players', 'skipped', {
         detail: { reason: 'save_in_progress' },
@@ -952,12 +903,13 @@ export default function App() {
       setBulkAddError(parts.join(' '));
     }
 
-    setPlayers(editedPlayers);
-    setBulkRows(buildBulkRowsFromPlayers(editedPlayers));
     logUserAction('bulk_update_players', 'bulk_modal.update_players', 'applied', {
       detail: { playerCount: editedPlayers.length },
     });
-    await flushSave('bulk_update_players');
+    persistAfterFlushSync('bulk_update_players', () => {
+      setPlayers(editedPlayers);
+      setBulkRows(buildBulkRowsFromPlayers(editedPlayers));
+    });
   };
 
   const updatePlayer = (playerId: string, updates: Partial<Player>) => {
@@ -1054,7 +1006,7 @@ export default function App() {
     );
   };
 
-  const markPlayerLeft = async (playerId: string) => {
+  const markPlayerLeft = (playerId: string) => {
     if (isSaving) {
       logUserAction('mark_player_left', 'roster.mark_left', 'skipped', {
         detail: { playerId, reason: 'save_in_progress' },
@@ -1062,8 +1014,14 @@ export default function App() {
       return;
     }
     logUserAction('mark_player_left', 'roster.mark_left', 'applied', { detail: { playerId } });
+<<<<<<< HEAD
     updatePlayer(playerId, { arrivalStatus: 'left', joinedQueueAt: null });
     await flushSave('mark_player_left');
+=======
+    persistAfterFlushSync('mark_player_left', () => {
+      updatePlayer(playerId, { arrivalStatus: 'left' });
+    });
+>>>>>>> e44fe25d899df8141753ed489b7742252552ec7c
   };
 
   const buildMatch = (groupPlayerIds: string[]): Match | null => {
@@ -1123,6 +1081,7 @@ export default function App() {
         };
       }),
     );
+    schedulePersistAfterMutation('assign_group_to_court');
   };
 
   const autoAssignGroup = (assignment: AutoAssignment) => {
@@ -1161,6 +1120,7 @@ export default function App() {
         playerIds.includes(player.id) ? { ...player, arrivalStatus: 'playing' } : player,
       ),
     );
+    schedulePersistAfterMutation('start_match');
   };
 
   const toggleMatchWinner = (courtId: string, playerId: string) => {
@@ -1181,6 +1141,7 @@ export default function App() {
         return { ...court, match: { ...court.match, winnerIds } };
       }),
     );
+    schedulePersistAfterMutation('toggle_match_winner');
   };
 
   const closeMatch = (courtId: string) => {
@@ -1262,6 +1223,7 @@ export default function App() {
     });
 
     updateCourt(courtId, { status: 'ready', match: null });
+    schedulePersistAfterMutation('close_match');
   };
 
   const resetCourt = (courtId: string) => {
@@ -1284,6 +1246,7 @@ export default function App() {
     }
 
     updateCourt(courtId, { status: 'ready', match: null });
+    schedulePersistAfterMutation('reset_court');
   };
 
   const removeLoadedPlayer = (courtId: string, removedPlayerId: string) => {
@@ -1317,6 +1280,7 @@ export default function App() {
         status: 'ready',
         match: null,
       });
+      schedulePersistAfterMutation('remove_loaded_player');
       return;
     }
 
@@ -1346,6 +1310,7 @@ export default function App() {
     );
     updateCourt(courtId, { status: 'loaded', match: nextMatch });
     setSelectedCourtId(courtId);
+    schedulePersistAfterMutation('remove_loaded_player');
   };
 
   const handleDragStart = (
@@ -1383,6 +1348,7 @@ export default function App() {
 
     if (data.type === 'group') {
       assignGroupToCourt(courtId, data.playerIds);
+      // assignGroupToCourt already schedules persist
       return;
     }
 
@@ -1421,6 +1387,7 @@ export default function App() {
           : player,
       ),
     );
+    schedulePersistAfterMutation('return_player_to_queue');
   };
 
   const renderBulkModal = () => (
