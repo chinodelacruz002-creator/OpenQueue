@@ -83,10 +83,23 @@ interface BulkPlayerRow extends PlayerForm {
   playerId: string | null;
 }
 
-const splitRowsIntoColumns = (rows: BulkPlayerRow[]): BulkPlayerRow[][] => {
-  const midpoint = Math.ceil(rows.length / 2);
-  return [rows.slice(0, midpoint), rows.slice(midpoint)];
+/** Distribute row-major order into N table columns (equal split). */
+const splitRowsIntoTableColumns = (rows: BulkPlayerRow[], columnCount: number): BulkPlayerRow[][] => {
+  const n = rows.length;
+  if (n === 0) {
+    return Array.from({ length: columnCount }, () => []);
+  }
+  const out: BulkPlayerRow[][] = [];
+  for (let c = 0; c < columnCount; c += 1) {
+    const start = Math.floor((c * n) / columnCount);
+    const end = Math.floor(((c + 1) * n) / columnCount);
+    out.push(rows.slice(start, end));
+  }
+  return out;
 };
+
+const BULK_MIN_ROWS = 10;
+const BULK_TABLE_COLUMN_COUNT = 4;
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
@@ -104,35 +117,40 @@ const createBulkRow = (): BulkPlayerRow => ({
   arrivalStatus: 'present',
 });
 
-const createBulkRows = () => Array.from({ length: 40 }, createBulkRow);
+/** At least 10 rows; if the last has a name, one empty row after; drop duplicate trailing empties. */
+const normalizeBulkRowsState = (rows: BulkPlayerRow[]): BulkPlayerRow[] => {
+  const out = [...rows];
+  while (out.length > BULK_MIN_ROWS && !out[out.length - 1]!.name.trim() && !out[out.length - 2]!.name.trim()) {
+    out.pop();
+  }
+  while (out.length < BULK_MIN_ROWS) {
+    out.push(createBulkRow());
+  }
+  if (out[out.length - 1]!.name.trim()) {
+    out.push(createBulkRow());
+  }
+  return out;
+};
+
+const createInitialBulkRows = () => normalizeBulkRowsState([]);
 
 const buildBulkRowsFromPlayers = (players: Player[]): BulkPlayerRow[] => {
-  const rows: BulkPlayerRow[] = createBulkRows();
-  const taken = new Set<number>();
-
-  players.forEach((player) => {
-    const index = rows.findIndex((_, idx) => !taken.has(idx));
-    if (index < 0) {
-      return;
-    }
-    taken.add(index);
-    rows[index] = {
-      ...rows[index],
-      playerId: player.id,
-      name: player.name,
-      level: player.level,
-      minLevel: player.minLevel,
-      maxLevel: player.maxLevel,
-      paddle: player.paddle,
-      gripColor: player.gripColor,
-      preferredPartnerName: player.preferredPartnerName,
-      phone: player.phone ?? '',
-      arrivalStatus: player.arrivalStatus,
-      savedPlayerId: player.persistentId ?? '',
-    };
-  });
-
-  return rows;
+  const dataRows: BulkPlayerRow[] = players.map((player) => ({
+    ...createBulkRow(),
+    rowId: crypto.randomUUID(),
+    playerId: player.id,
+    name: player.name,
+    level: player.level,
+    minLevel: player.minLevel,
+    maxLevel: player.maxLevel,
+    paddle: player.paddle,
+    gripColor: player.gripColor,
+    preferredPartnerName: player.preferredPartnerName,
+    phone: player.phone ?? '',
+    arrivalStatus: player.arrivalStatus,
+    savedPlayerId: player.persistentId ?? '',
+  }));
+  return normalizeBulkRowsState(dataRows);
 };
 
 const createInitialCourts = (): Court[] =>
@@ -240,6 +258,61 @@ const upsertSavedPlayer = (
   );
 };
 
+/**
+ * Links session players to `public.players` rows. Without a `persistentId`, Supabase upserts skip
+ * that person even though they appear in open play JSON — so they look "not saved" in the DB.
+ */
+const ensureSavedProfilesForSession = (
+  sessionPlayers: Player[],
+  currentSaved: SavedPlayer[],
+): { players: Player[]; savedPlayers: SavedPlayer[] } => {
+  let saved = currentSaved;
+  const players = sessionPlayers.map((p) => {
+    if (p.persistentId) {
+      return p;
+    }
+    const nameKey = normalizePlayerName(p.name);
+    const phoneDigits = normalizePhoneDigits(p.phone);
+    const existing = saved.find((s) => {
+      if (normalizePlayerName(s.name) !== nameKey) {
+        return false;
+      }
+      if (!phoneDigits) {
+        return true;
+      }
+      return normalizePhoneDigits(s.phone) === phoneDigits;
+    });
+    if (existing) {
+      return { ...p, persistentId: existing.id };
+    }
+    const incoming: SavedPlayer = {
+      id: crypto.randomUUID(),
+      name: p.name.trim(),
+      level: p.level,
+      minLevel: p.minLevel,
+      maxLevel: p.maxLevel,
+      paddle: p.paddle,
+      gripColor: p.gripColor,
+      preferredPartnerName: p.preferredPartnerName,
+      phone: p.phone,
+      wins: 0,
+      losses: 0,
+      gamesPlayed: 0,
+      rankingScore: 0,
+    };
+    saved = upsertSavedPlayer(saved, incoming);
+    const linked =
+      saved.find((s) => s.id === incoming.id) ??
+      saved.find(
+        (s) =>
+          normalizePlayerName(s.name) === nameKey &&
+          (!phoneDigits || normalizePhoneDigits(s.phone) === phoneDigits),
+      );
+    return { ...p, persistentId: linked?.id ?? incoming.id };
+  });
+  return { players, savedPlayers: saved };
+};
+
 const getPlayerIdsInMatch = (match: Match) => match.players.map((player) => player.id);
 
 const isPlayerCompatibleWithCourt = (): boolean => true;
@@ -267,7 +340,7 @@ export default function App() {
   const [paddleOptions, setPaddleOptions] = useState(PADDLE_OPTIONS);
   const [gripColorOptions, setGripColorOptions] = useState(GRIP_COLOR_OPTIONS);
   const [courts, setCourts] = useState<Court[]>(createInitialCourts);
-  const [bulkRows, setBulkRows] = useState<BulkPlayerRow[]>(createBulkRows());
+  const [bulkRows, setBulkRows] = useState<BulkPlayerRow[]>(() => createInitialBulkRows());
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [maxMinutes, setMaxMinutes] = useState(DEFAULT_MAX_MINUTES);
@@ -354,14 +427,11 @@ export default function App() {
         return;
       }
 
-      // User-triggered saves must not be dropped if another save is in flight; debounced saves
-      // bail after waiting so we do not duplicate writes for the same revision.
+      // Wait for any in-flight save, then always persist the latest snapshot (never drop debounced
+      // updates that arrived while a previous save was running).
       let pendingSave = savePromiseRef.current;
       while (pendingSave) {
         await pendingSave;
-        if (saveTrigger === 'debounced_state_change') {
-          return;
-        }
         pendingSave = savePromiseRef.current;
       }
 
@@ -448,7 +518,7 @@ export default function App() {
     setPlayers([]);
     setQueueManualOrder([]);
     setCourts((c) => resetCourtsKeepingLayout(c));
-    setBulkRows(createBulkRows());
+    setBulkRows(createInitialBulkRows());
     await flushSave('full_reset_today');
   };
 
@@ -783,16 +853,27 @@ export default function App() {
     [savedPlayers],
   );
 
-  const bulkRowsPerColumn = Math.ceil(bulkRows.length / 2);
-  const bulkColumnRows = splitRowsIntoColumns(bulkRows);
+  const bulkColumnRows = useMemo(
+    () => splitRowsIntoTableColumns(bulkRows, BULK_TABLE_COLUMN_COUNT),
+    [bulkRows],
+  );
+  const bulkColumnRowOffsets = useMemo(() => {
+    let acc = 0;
+    return bulkColumnRows.map((col) => {
+      const start = acc;
+      acc += col.length;
+      return start;
+    });
+  }, [bulkColumnRows]);
 
   const updateBulkRow = (
     rowId: string,
     updates: Partial<BulkPlayerRow>,
   ) => {
-    setBulkRows((currentRows) =>
-      currentRows.map((row) => (row.rowId === rowId ? { ...row, ...updates } : row)),
-    );
+    setBulkRows((currentRows) => {
+      const next = currentRows.map((row) => (row.rowId === rowId ? { ...row, ...updates } : row));
+      return normalizeBulkRowsState(next);
+    });
   };
 
   const updateBulkName = (rowId: string, name: string) => {
@@ -823,33 +904,20 @@ export default function App() {
   };
 
   const resetBulkRows = () => {
-    setBulkRows(createBulkRows());
+    setBulkRows(createInitialBulkRows());
   };
 
   const clearBulkRow = (rowId: string) => {
-    if (isSaving) {
-      logUserAction('bulk_clear_row', 'bulk_modal.clear_row', 'skipped', {
-        detail: { rowId, reason: 'save_in_progress' },
-      });
-      return;
-    }
     logUserAction('bulk_clear_row', 'bulk_modal.clear_row', 'applied', { detail: { rowId } });
     persistAfterFlushSync('bulk_clear_row', () => {
-      setBulkRows((currentRows) =>
-        currentRows.map((row) =>
-          row.rowId === rowId ? { ...createBulkRow(), rowId: row.rowId } : row,
-        ),
-      );
+      setBulkRows((currentRows) => {
+        const next = currentRows.filter((row) => row.rowId !== rowId);
+        return normalizeBulkRowsState(next);
+      });
     });
   };
 
   const handleBulkAdd = () => {
-    if (isSaving) {
-      logUserAction('bulk_update_players', 'bulk_modal.update_players', 'skipped', {
-        detail: { reason: 'save_in_progress' },
-      });
-      return;
-    }
     logUserAction('bulk_update_players', 'bulk_modal.update_players', 'started', {
       detail: { namedRowCount: bulkRows.filter((row) => row.name.trim()).length },
     });
@@ -872,7 +940,15 @@ export default function App() {
 
     const existingNames = new Set(players.map((player) => normalizePlayerName(player.name)));
     const alreadyInRoster: string[] = [];
-    const rowsToApply = uniqueRows.filter((row) => {
+    const relinkedRows = uniqueRows.map((row) => {
+      const key = normalizePlayerName(row.name);
+      if (row.playerId) {
+        return row;
+      }
+      const sessionMatch = players.find((pl) => normalizePlayerName(pl.name) === key);
+      return sessionMatch ? { ...row, playerId: sessionMatch.id } : row;
+    });
+    const rowsToApply = relinkedRows.filter((row) => {
       const key = normalizePlayerName(row.name);
       if (existingNames.has(key) && !row.playerId) {
         alreadyInRoster.push(row.name.trim());
@@ -977,12 +1053,16 @@ export default function App() {
       setBulkAddError(parts.join(' '));
     }
 
+    const { players: sessionWithSaved, savedPlayers: mergedSaved } =
+      ensureSavedProfilesForSession(editedPlayers, savedPlayers);
+
     logUserAction('bulk_update_players', 'bulk_modal.update_players', 'applied', {
-      detail: { playerCount: editedPlayers.length },
+      detail: { playerCount: sessionWithSaved.length },
     });
     persistAfterFlushSync('bulk_update_players', () => {
-      setPlayers(editedPlayers);
-      setBulkRows(buildBulkRowsFromPlayers(editedPlayers));
+      setPlayers(sessionWithSaved);
+      setSavedPlayers(mergedSaved);
+      setBulkRows(buildBulkRowsFromPlayers(sessionWithSaved));
     });
   };
 
@@ -1085,12 +1165,6 @@ export default function App() {
   };
 
   const markPlayerLeft = (playerId: string) => {
-    if (isSaving) {
-      logUserAction('mark_player_left', 'roster.mark_left', 'skipped', {
-        detail: { playerId, reason: 'save_in_progress' },
-      });
-      return;
-    }
     logUserAction('mark_player_left', 'roster.mark_left', 'applied', { detail: { playerId } });
     persistAfterFlushSync('mark_player_left', () => {
       updatePlayer(playerId, { arrivalStatus: 'left', joinedQueueAt: null });
@@ -1590,7 +1664,7 @@ export default function App() {
                   {columnRows.map((row, rowIndex) => (
                     <tr key={row.rowId}>
                       <td className="bulk-row-number">
-                        {columnIndex * bulkRowsPerColumn + rowIndex + 1}
+                        {(bulkColumnRowOffsets[columnIndex] ?? 0) + rowIndex + 1}
                       </td>
                       <td>
                         <input
@@ -2528,12 +2602,12 @@ export default function App() {
               <h2>Standby queue</h2>
             </div>
             <p className="hint">
-              Four standby slots (fill with four players each). Drag a full group to a free ready
+              Four group slots in a row (four players per group). Drag a full group to a free ready
               court; the timer starts when the group lands. Drag a player onto another waiting
               player to swap order and regroup.
             </p>
 
-            <div className="queue-grid">
+            <div className="queue-grid queue-grid-standby">
               {queueGroups.map((group) => {
                 const canUseSelectedCourt =
                   Boolean(selectedCourt) &&
@@ -2568,7 +2642,7 @@ export default function App() {
                           : 'Add players from the list below'}
                       </small>
                     </div>
-                    <div className="player-stack">
+                    <div className="player-stack player-stack-standby">
                       {group.players.length === 0 ? (
                         <p className="hint">—</p>
                       ) : (

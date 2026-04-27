@@ -244,9 +244,13 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
   }
 
   const mirrorBeforeFetch = readMirrorEnvelope();
-  const hadPending = Boolean(
-    mirrorBeforeFetch && mirrorBeforeFetch.persistenceGen > mirrorBeforeFetch.savedGen,
-  );
+  /** Local state was updated (writeOptimisticMirror) before the server confirmed it — do not replace with a stale network row. */
+  if (
+    mirrorBeforeFetch &&
+    mirrorBeforeFetch.persistenceGen > mirrorBeforeFetch.savedGen
+  ) {
+    return mirrorBeforeFetch.app;
+  }
 
   const { data: playerRows, error: playerError } = await supabase
     .from('players')
@@ -267,17 +271,6 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
   const savedPlayers = playerRows.map(mapRowToSavedPlayer);
 
   const serverTs = stateRow?.updated_at ?? null;
-
-  if (hadPending && mirrorBeforeFetch) {
-    if (!serverTs || !mirrorBeforeFetch.serverUpdatedAt) {
-      return mirrorBeforeFetch.app;
-    }
-    const serverTime = new Date(serverTs).getTime();
-    const mirrorTime = new Date(mirrorBeforeFetch.serverUpdatedAt).getTime();
-    if (serverTime <= mirrorTime) {
-      return mirrorBeforeFetch.app;
-    }
-  }
 
   if (stateError || !stateRow) {
     const fallback: AppData = migrateAppData({
