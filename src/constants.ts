@@ -28,6 +28,9 @@ export const GRIP_COLOR_OPTIONS = [
 
 export const LOCAL_STORAGE_KEY = 'openqueue-app-data';
 
+/** Last good snapshot when using Supabase (offline fallback + instant re-read after save). */
+export const SUPABASE_MIRROR_STORAGE_KEY = 'openqueue-supabase-mirror';
+
 export const getLevelRange = (level: number) => {
   if (level === 1) {
     return { minLevel: 1, maxLevel: 2 };
