@@ -12,11 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  logOpenQueueAction,
-  logUserInteraction,
-  type OpenQueueLogStatus,
-} from './actionLog';
+import { logUserInteraction, type UserActionLogStatus } from './actionLog';
 import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
 import {
   buildAutoAssignments,
@@ -223,13 +219,15 @@ export default function App() {
   const [bulkAddError, setBulkAddError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const savePromiseRef = useRef<Promise<void> | null>(null);
+  /** After applying remote data, skip one debounced save to avoid save↔realtime echo. */
+  const skipNextAutoSaveRef = useRef(false);
   const [now, setNow] = useState(0);
 
   const logUserAction = useCallback(
     (
       action: string,
       trigger: string,
-      status: OpenQueueLogStatus,
+      status: UserActionLogStatus,
       options?: { detail?: Record<string, unknown>; throttleKey?: string },
     ) => {
       logUserInteraction(
@@ -262,14 +260,6 @@ export default function App() {
   const flushSave = useCallback(
     async (saveTrigger = 'debounced_state_change') => {
       if (isLockedPublicView) {
-        logOpenQueueAction({
-          category: 'persistence',
-          action: 'save_open_play',
-          trigger: saveTrigger,
-          status: 'skipped',
-          persistence: persistenceLabel(),
-          detail: { reason: 'locked_public_view' },
-        });
         return;
       }
 
@@ -279,36 +269,23 @@ export default function App() {
       }
 
       setIsSaving(true);
-      logOpenQueueAction({
-        category: 'persistence',
-        action: 'save_open_play',
-        trigger: saveTrigger,
-        status: 'started',
-        persistence: persistenceLabel(),
-      });
 
       const promise = saveOpenPlayData(buildAppData())
         .then(() => {
-          logOpenQueueAction({
-            category: 'persistence',
-            action: 'save_open_play',
-            trigger: saveTrigger,
-            status: 'success',
-            persistence: persistenceLabel(),
-          });
           setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
         })
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
-          logOpenQueueAction({
-            category: 'persistence',
-            action: 'save_open_play',
-            trigger: saveTrigger,
-            status: 'failed',
-            persistence: persistenceLabel(),
-            error: message,
-          });
           setSaveStatus('Save failed');
+          if (saveTrigger !== 'debounced_state_change') {
+            logUserInteraction({
+              action: 'save_open_play',
+              trigger: saveTrigger,
+              status: 'failed',
+              persistence: persistenceLabel(),
+              error: message,
+            });
+          }
         })
         .finally(() => {
           setIsSaving(false);
@@ -337,6 +314,9 @@ export default function App() {
   };
 
   const applyLoad = useCallback((data: AppData | null, kind: 'initial' | 'sync') => {
+    if (kind === 'sync') {
+      skipNextAutoSaveRef.current = true;
+    }
     const appData = data ?? createAppData();
     setSessionDate(appData.sessionDate || todayKey());
     setPlayers(appData.players ?? []);
@@ -363,25 +343,6 @@ export default function App() {
       if (!mounted) {
         return;
       }
-      if (data === null && hasSupabaseConfig) {
-        logOpenQueueAction({
-          category: 'data_load',
-          action: 'load_open_play',
-          trigger: 'app.initial_mount',
-          status: 'failed',
-          persistence: 'supabase',
-          error: 'loadOpenPlayData returned null',
-        });
-      } else {
-        logOpenQueueAction({
-          category: 'data_load',
-          action: 'load_open_play',
-          trigger: 'app.initial_mount',
-          status: 'success',
-          persistence: persistenceLabel(),
-          detail: { hasRemoteRow: Boolean(data) },
-        });
-      }
       applyLoad(data, 'initial');
     });
 
@@ -396,25 +357,6 @@ export default function App() {
     }
     return subscribeOpenPlayRealtime(() => {
       void loadOpenPlayData().then((data) => {
-        if (data === null && hasSupabaseConfig) {
-          logOpenQueueAction({
-            category: 'data_load',
-            action: 'load_open_play',
-            trigger: 'app.realtime_sync',
-            status: 'failed',
-            persistence: 'supabase',
-            error: 'loadOpenPlayData returned null',
-          });
-        } else {
-          logOpenQueueAction({
-            category: 'data_load',
-            action: 'load_open_play',
-            trigger: 'app.realtime_sync',
-            status: 'success',
-            persistence: persistenceLabel(),
-            detail: { hasRemoteRow: Boolean(data) },
-          });
-        }
         applyLoad(data, 'sync');
       });
     });
@@ -426,39 +368,12 @@ export default function App() {
     if (hasSupabaseConfig) {
       timer = window.setInterval(() => {
         void loadOpenPlayData().then((data) => {
-          if (data === null && hasSupabaseConfig) {
-            logOpenQueueAction({
-              category: 'data_load',
-              action: 'load_open_play',
-              trigger: 'app.interval_poll',
-              status: 'failed',
-              persistence: 'supabase',
-              error: 'loadOpenPlayData returned null',
-            });
-          } else {
-            logOpenQueueAction({
-              category: 'data_load',
-              action: 'load_open_play',
-              trigger: 'app.interval_poll',
-              status: 'success',
-              persistence: persistenceLabel(),
-              detail: { hasRemoteRow: Boolean(data) },
-            });
-          }
           applyLoad(data, 'sync');
         });
       }, 25000);
     } else if (needsPoll) {
       timer = window.setInterval(() => {
         void loadOpenPlayData().then((data) => {
-          logOpenQueueAction({
-            category: 'data_load',
-            action: 'load_open_play',
-            trigger: 'app.interval_poll_local',
-            status: 'success',
-            persistence: 'local',
-            detail: { hasRemoteRow: Boolean(data) },
-          });
           applyLoad(data, 'sync');
         });
       }, 5000);
@@ -472,6 +387,10 @@ export default function App() {
 
   useEffect(() => {
     if (isLockedPublicView) {
+      return;
+    }
+    if (skipNextAutoSaveRef.current) {
+      skipNextAutoSaveRef.current = false;
       return;
     }
     const saveTimer = window.setTimeout(() => {

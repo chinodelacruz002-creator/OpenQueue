@@ -1,4 +1,3 @@
-import { logOpenQueueAction } from './actionLog';
 import { LOCAL_STORAGE_KEY } from './constants';
 import type { AppData, Court, Player, SavedPlayer } from './types';
 import { hasSupabaseConfig, supabase } from './utils/supabase';
@@ -47,14 +46,6 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
     .order('name', { ascending: true });
 
   if (playerError) {
-    logOpenQueueAction({
-      category: 'data_load',
-      action: 'load_players',
-      trigger: 'storage.loadOpenPlayData',
-      status: 'failed',
-      persistence: 'supabase',
-      error: playerError.message,
-    });
     return null;
   }
 
@@ -126,18 +117,6 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
   );
   if (errors.length > 0) {
     const message = errors.map((e) => e.message).join('; ');
-    logOpenQueueAction({
-      category: 'persistence',
-      action: 'supabase_upsert',
-      trigger: 'storage.saveOpenPlayData',
-      status: 'failed',
-      persistence: 'supabase',
-      detail: {
-        playersError: playersResult.error?.message ?? null,
-        stateError: stateResult.error?.message ?? null,
-      },
-      error: message,
-    });
     throw new Error(message);
   }
 };

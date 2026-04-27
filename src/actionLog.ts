@@ -1,24 +1,22 @@
 /**
- * Writes one JSON line per event to the browser console so admins can trace
- * what the app did and whether persistence succeeded.
+ * Writes one JSON line per user-driven action to the browser console.
+ * Automated loads and saves are not logged here (they are not user actions).
  */
 
-export type OpenQueueLogCategory = 'interaction' | 'persistence' | 'data_load';
-
-export type OpenQueueLogStatus =
+export type UserActionLogStatus =
   | 'started'
   | 'applied'
   | 'success'
   | 'failed'
   | 'skipped';
 
-export interface OpenQueueActionLog {
+export interface UserActionLog {
   v: 1;
   timestamp: string;
-  category: OpenQueueLogCategory;
+  category: 'user_action';
   action: string;
   trigger: string;
-  status: OpenQueueLogStatus;
+  status: UserActionLogStatus;
   persistence: 'none' | 'local' | 'supabase';
   detail?: Record<string, unknown>;
   error?: string;
@@ -29,21 +27,12 @@ const nowIso = () => new Date().toISOString();
 const interactionThrottleMs = 600;
 const lastInteractionLogAt = new Map<string, number>();
 
-export const logOpenQueueAction = (entry: Omit<OpenQueueActionLog, 'v' | 'timestamp'>): void => {
-  const payload: OpenQueueActionLog = {
-    v: 1,
-    timestamp: nowIso(),
-    ...entry,
-  };
-  console.log(JSON.stringify(payload));
-};
-
 /**
  * Logs a user-driven UI change. When `throttleKey` is set, repeated logs for the
  * same key within `interactionThrottleMs` are dropped (typing in inputs).
  */
 export const logUserInteraction = (
-  entry: Omit<OpenQueueActionLog, 'v' | 'timestamp' | 'category'>,
+  entry: Omit<UserActionLog, 'v' | 'timestamp' | 'category'>,
   options?: { throttleKey?: string },
 ): void => {
   if (options?.throttleKey) {
@@ -55,5 +44,11 @@ export const logUserInteraction = (
     lastInteractionLogAt.set(key, Date.now());
   }
 
-  logOpenQueueAction({ category: 'interaction', ...entry });
+  const payload: UserActionLog = {
+    v: 1,
+    timestamp: nowIso(),
+    category: 'user_action',
+    ...entry,
+  };
+  console.log(JSON.stringify(payload));
 };
