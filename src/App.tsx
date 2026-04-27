@@ -67,13 +67,8 @@ const isLockedPublicView = (() => {
 })();
 const isRegisterView = getInitialViewParam() === 'register';
 
-const getAdminPasscode = (): string => {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const yyyy = String(d.getFullYear());
-  return `${mm}${dd}${yyyy}`;
-};
+const getExpectedAdminAccessCode = (): string =>
+  (import.meta.env.VITE_ADMIN_ACCESS_CODE as string | undefined)?.trim() ?? '';
 
 const resetCourtsKeepingLayout = (courtList: Court[]): Court[] =>
   courtList.map((court) => ({
@@ -383,6 +378,7 @@ export default function App() {
           const message = error instanceof Error ? error.message : String(error);
           setSaveStatus('Save failed');
           if (saveTrigger !== 'debounced_state_change') {
+            console.error('[OpenQueue] saveOpenPlayData failed', error);
             logUserInteraction({
               action: 'save_open_play',
               trigger: saveTrigger,
@@ -488,13 +484,18 @@ export default function App() {
   };
 
   const tryAdminUnlock = () => {
-    if (passcodeInput.replace(/\D/g, '') === getAdminPasscode()) {
+    const expected = getExpectedAdminAccessCode();
+    if (!expected) {
+      setPasscodeError('Admin access is not configured. Set VITE_ADMIN_ACCESS_CODE for this build (see README).');
+      return;
+    }
+    if (passcodeInput.trim() === expected) {
       sessionStorage.setItem(ADMIN_UNLOCK_KEY, '1');
       setAdminUnlocked(true);
       setPasscodeError('');
       setPasscodeInput('');
     } else {
-      setPasscodeError('Incorrect passcode.');
+      setPasscodeError('Incorrect access code.');
     }
   };
 
@@ -2224,21 +2225,19 @@ export default function App() {
         <section className="hero hero-slim">
           <div>
             <span className="eyebrow">Staff only</span>
-            <h1>Admin passcode</h1>
-            <p>
-              Enter today&apos;s passcode (local date as MMDDYYYY, e.g. April 26, 2026 → 04262026).
-            </p>
+            <h1>Admin access</h1>
+            <p>Enter the access code from your organizer.</p>
           </div>
         </section>
         <section className="panel passcode-panel">
           <label className="register-field">
-            Passcode
+            Access code
             <input
+              type="password"
               value={passcodeInput}
               onChange={(event) => setPasscodeInput(event.target.value)}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              placeholder="MMDDYYYY"
+              autoComplete="off"
+              placeholder="Access Code"
             />
           </label>
           {passcodeError ? (
@@ -2359,105 +2358,7 @@ export default function App() {
             </div>
           </section>
 
-          <section
-            className="panel queue-panel"
-            onDrop={handleQueueDrop}
-            onDragOver={(event) => event.preventDefault()}
-          >
-            <div className="panel-title">
-              <UsersRound />
-              <h2>Standby queue</h2>
-            </div>
-            <p className="hint">
-              Four standby slots (fill with four players each). Drag a full group to a free ready
-              court; the timer starts when the group lands. Drag a player onto another waiting
-              player to swap order and regroup.
-            </p>
-
-            <div className="queue-grid">
-              {queueGroups.map((group) => {
-                const canUseSelectedCourt =
-                  Boolean(selectedCourt) &&
-                  group.compatibleCourtIds.includes(selectedCourtId) &&
-                  group.playerIds.length === 4;
-                const isFull = group.playerIds.length === 4;
-
-                return (
-                  <article
-                    className={groupClassName(canUseSelectedCourt)}
-                    draggable={isFull}
-                    key={group.id}
-                    onDragStart={(event) => {
-                      if (!isFull) {
-                        return;
-                      }
-                      handleDragStart(event, {
-                        type: 'group',
-                        groupId: group.id,
-                        playerIds: group.playerIds,
-                      });
-                    }}
-                  >
-                    <div className="queue-card-header">
-                      <span>
-                        <GripVertical size={16} />
-                        {isFull ? 'Group of 4' : 'Open slot'}
-                      </span>
-                      <small>
-                        {group.players.length
-                          ? `Avg L${group.averageLevel.toFixed(1)}`
-                          : 'Add players from the list below'}
-                      </small>
-                    </div>
-                    <div className="player-stack">
-                      {group.players.length === 0 ? (
-                        <p className="hint">—</p>
-                      ) : (
-                        group.players.map((player) => (
-                          <div
-                            className="player-chip"
-                            draggable
-                            key={player.id}
-                            onDragStart={(event) =>
-                              handleDragStart(event, {
-                                type: 'player',
-                                playerId: player.id,
-                              })
-                            }
-                            onDragOver={(event) => event.preventDefault()}
-                            onDrop={(event) => handleStandbyPlayerDrop(event, player.id)}
-                          >
-                            <span>
-                              {player.name}
-                              <small>{sessionDayRecordLabel(player)}</small>
-                            </span>
-                            <span
-                              className="color-dot"
-                              style={{
-                                background: player.gripColor || '#94a3b8',
-                              }}
-                            />
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    <div className="compatibility-list">
-                      Can play:{' '}
-                      {group.compatibleCourtIds.length
-                        ? group.compatibleCourtIds
-                            .map((courtId) =>
-                              courts.find((court) => court.id === courtId)?.name,
-                            )
-                            .join(', ')
-                        : '—'}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="court-grid">
+          <section className="court-grid court-grid-compact">
             {courts.map((court) => {
               const match = court.match;
               const elapsedSeconds = getElapsedSeconds(match, now);
@@ -2617,6 +2518,105 @@ export default function App() {
             })}
           </section>
 
+          <section
+            className="panel queue-panel"
+            onDrop={handleQueueDrop}
+            onDragOver={(event) => event.preventDefault()}
+          >
+            <div className="panel-title">
+              <UsersRound />
+              <h2>Standby queue</h2>
+            </div>
+            <p className="hint">
+              Four standby slots (fill with four players each). Drag a full group to a free ready
+              court; the timer starts when the group lands. Drag a player onto another waiting
+              player to swap order and regroup.
+            </p>
+
+            <div className="queue-grid">
+              {queueGroups.map((group) => {
+                const canUseSelectedCourt =
+                  Boolean(selectedCourt) &&
+                  group.compatibleCourtIds.includes(selectedCourtId) &&
+                  group.playerIds.length === 4;
+                const isFull = group.playerIds.length === 4;
+
+                return (
+                  <article
+                    className={groupClassName(canUseSelectedCourt)}
+                    draggable={isFull}
+                    key={group.id}
+                    onDragStart={(event) => {
+                      if (!isFull) {
+                        return;
+                      }
+                      handleDragStart(event, {
+                        type: 'group',
+                        groupId: group.id,
+                        playerIds: group.playerIds,
+                      });
+                    }}
+                  >
+                    <div className="queue-card-header">
+                      <span>
+                        <GripVertical size={16} />
+                        {isFull ? 'Group of 4' : 'Open slot'}
+                      </span>
+                      <small>
+                        {group.players.length
+                          ? `Avg L${group.averageLevel.toFixed(1)}`
+                          : 'Add players from the list below'}
+                      </small>
+                    </div>
+                    <div className="player-stack">
+                      {group.players.length === 0 ? (
+                        <p className="hint">—</p>
+                      ) : (
+                        group.players.map((player) => (
+                          <div
+                            className="player-chip"
+                            draggable
+                            key={player.id}
+                            onDragStart={(event) =>
+                              handleDragStart(event, {
+                                type: 'player',
+                                playerId: player.id,
+                              })
+                            }
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={(event) => handleStandbyPlayerDrop(event, player.id)}
+                          >
+                            <span>
+                              <span className="player-chip-level">L{player.level}</span>
+                              {player.name}
+                              <small>{sessionDayRecordLabel(player)}</small>
+                            </span>
+                            <span
+                              className="color-dot"
+                              style={{
+                                background: player.gripColor || '#94a3b8',
+                              }}
+                            />
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <div className="compatibility-list">
+                      Can play:{' '}
+                      {group.compatibleCourtIds.length
+                        ? group.compatibleCourtIds
+                            .map((courtId) =>
+                              courts.find((court) => court.id === courtId)?.name,
+                            )
+                            .join(', ')
+                        : '—'}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+
           <section className="panel player-table-panel">
             <div className="panel-title">
               <UsersRound />
@@ -2626,6 +2626,7 @@ export default function App() {
               <table className="player-admin-table">
                 <thead>
                   <tr>
+                    <th className="roster-drag-col" aria-label="Drag to standby" />
                     <th>Name</th>
                     <th>Status</th>
                     <th>Lvl</th>
@@ -2640,6 +2641,20 @@ export default function App() {
                 <tbody>
                   {rosterActive.map((player) => (
                     <tr key={player.id}>
+                      <td className="roster-drag-col">
+                        <span
+                          className="roster-drag-handle"
+                          draggable
+                          role="button"
+                          tabIndex={0}
+                          title="Drag onto a standby player to swap queue order"
+                          onDragStart={(event) =>
+                            handleDragStart(event, { type: 'player', playerId: player.id })
+                          }
+                        >
+                          <GripVertical size={16} />
+                        </span>
+                      </td>
                       <td>
                         <input
                           value={player.name}
@@ -2754,11 +2769,12 @@ export default function App() {
                   ))}
                   {rosterInactive.length > 0 && (
                     <tr className="roster-subhead">
-                      <td colSpan={10}>Left or unavailable (still listed for today)</td>
+                      <td colSpan={11}>Left or unavailable (still listed for today)</td>
                     </tr>
                   )}
                   {rosterInactive.map((player) => (
                     <tr className="roster-inactive" key={player.id}>
+                      <td className="roster-drag-col" />
                       <td>
                         <input
                           value={player.name}

@@ -106,7 +106,25 @@ Then set these environment variables. For Vite, use the `VITE_` names:
 ```bash
 VITE_SUPABASE_URL=your-project-url
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+VITE_ADMIN_ACCESS_CODE=your-secret-admin-code
 ```
+
+`VITE_ADMIN_ACCESS_CODE` is required for the staff admin screen (not the public player links). It is compared to the value you type on the admin unlock page. Set a strong value in production and add it to GitHub Actions secrets for deploys.
+
+### Troubleshooting (400 Bad Request from Supabase)
+
+If the browser console shows `400` on `POST .../rest/v1/open_play_state` or `.../players`, the table schema may be missing columns the app sends. In **Supabase → Table Editor**, confirm `open_play_state` has `show_public_ranking` and `queue_player_order`, and `players` has `phone`. If any are missing, run (in SQL Editor):
+
+```sql
+alter table open_play_state
+  add column if not exists show_public_ranking boolean not null default true;
+alter table open_play_state
+  add column if not exists queue_player_order text[] not null default '{}';
+alter table players
+  add column if not exists phone text not null default '';
+```
+
+Then retry saving. If it still fails, check the error `details` / `hint` in the network response body or in the app log after a failed save.
 
 The browser client lives in `src/utils/supabase.ts` and is used by
 `src/storage.ts` for both saved player profiles and live open play state.
@@ -121,6 +139,7 @@ For GitHub Pages, add these **repository** secrets and variables under **Setting
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
+- `VITE_ADMIN_ACCESS_CODE`
 
 If the live site does not show the same data on every device, the build almost certainly had no env vars: each browser falls back to its own **local storage** only. Fix the secrets and redeploy.
 

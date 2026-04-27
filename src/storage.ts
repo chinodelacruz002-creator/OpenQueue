@@ -384,7 +384,13 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
     (e): e is NonNullable<typeof playersResult.error> => Boolean(e),
   );
   if (errors.length > 0) {
-    const message = errors.map((e) => e.message).join('; ');
+    const message = errors
+      .map((e) =>
+        [e.message, (e as { details?: string }).details, (e as { hint?: string }).hint, e.code]
+          .filter(Boolean)
+          .join(' | '),
+      )
+      .join('; ');
     throw new Error(message);
   }
 
