@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { logUserInteraction, type UserActionLogStatus } from './actionLog';
 import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
 import {
@@ -309,9 +310,17 @@ export default function App() {
 
   /** Run persist after React applies batched state from the current event (avoids stale saves). */
   const schedulePersistAfterMutation = useCallback((saveTrigger: string) => {
-    window.setTimeout(() => {
+    queueMicrotask(() => {
       void flushSaveRef.current(saveTrigger);
-    }, 0);
+    });
+  }, []);
+
+  /** Commit pending state synchronously, then persist on the next microtask (avoids stale buildAppData when saving right after setState). */
+  const persistAfterFlushSync = useCallback((saveTrigger: string, commit: () => void) => {
+    flushSync(commit);
+    queueMicrotask(() => {
+      void flushSaveRef.current(saveTrigger);
+    });
   }, []);
 
   const goToViewMode = (mode: 'admin' | 'player') => {
@@ -522,7 +531,7 @@ export default function App() {
     setBulkRows(createBulkRows());
   };
 
-  const clearBulkRow = async (rowId: string) => {
+  const clearBulkRow = (rowId: string) => {
     if (isSaving) {
       logUserAction('bulk_clear_row', 'bulk_modal.clear_row', 'skipped', {
         detail: { rowId, reason: 'save_in_progress' },
@@ -530,15 +539,16 @@ export default function App() {
       return;
     }
     logUserAction('bulk_clear_row', 'bulk_modal.clear_row', 'applied', { detail: { rowId } });
-    setBulkRows((currentRows) =>
-      currentRows.map((row) =>
-        row.rowId === rowId ? { ...createBulkRow(), rowId: row.rowId } : row,
-      ),
-    );
-    await flushSave('bulk_clear_row');
+    persistAfterFlushSync('bulk_clear_row', () => {
+      setBulkRows((currentRows) =>
+        currentRows.map((row) =>
+          row.rowId === rowId ? { ...createBulkRow(), rowId: row.rowId } : row,
+        ),
+      );
+    });
   };
 
-  const handleBulkAdd = async () => {
+  const handleBulkAdd = () => {
     if (isSaving) {
       logUserAction('bulk_update_players', 'bulk_modal.update_players', 'skipped', {
         detail: { reason: 'save_in_progress' },
@@ -650,12 +660,13 @@ export default function App() {
       setBulkAddError(parts.join(' '));
     }
 
-    setPlayers(editedPlayers);
-    setBulkRows(buildBulkRowsFromPlayers(editedPlayers));
     logUserAction('bulk_update_players', 'bulk_modal.update_players', 'applied', {
       detail: { playerCount: editedPlayers.length },
     });
-    await flushSave('bulk_update_players');
+    persistAfterFlushSync('bulk_update_players', () => {
+      setPlayers(editedPlayers);
+      setBulkRows(buildBulkRowsFromPlayers(editedPlayers));
+    });
   };
 
   const updatePlayer = (playerId: string, updates: Partial<Player>) => {
@@ -741,7 +752,7 @@ export default function App() {
     );
   };
 
-  const markPlayerLeft = async (playerId: string) => {
+  const markPlayerLeft = (playerId: string) => {
     if (isSaving) {
       logUserAction('mark_player_left', 'roster.mark_left', 'skipped', {
         detail: { playerId, reason: 'save_in_progress' },
@@ -749,8 +760,9 @@ export default function App() {
       return;
     }
     logUserAction('mark_player_left', 'roster.mark_left', 'applied', { detail: { playerId } });
-    updatePlayer(playerId, { arrivalStatus: 'left' });
-    await flushSave('mark_player_left');
+    persistAfterFlushSync('mark_player_left', () => {
+      updatePlayer(playerId, { arrivalStatus: 'left' });
+    });
   };
 
   const buildMatch = (groupPlayerIds: string[]): Match | null => {
