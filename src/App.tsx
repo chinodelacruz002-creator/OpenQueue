@@ -2263,8 +2263,18 @@ export default function App() {
                   ? court.status
                   : 'Available for next group';
 
+              const publicTimerCardClass =
+                court.match?.startedAt && publicTimer === 'over'
+                  ? ' public-court-card-timer-over'
+                  : court.match?.startedAt && publicTimer === 'warning'
+                    ? ' public-court-card-timer-warn'
+                    : '';
+
               return (
-                <article className={`public-card court-public-card ${court.status}`} key={court.id}>
+                <article
+                  className={`public-card court-public-card ${court.status}${publicTimerCardClass}`}
+                  key={court.id}
+                >
                   <strong>{court.name}</strong>
                   {court.match ? (
                     <div className="public-court-teams">
@@ -2571,6 +2581,12 @@ export default function App() {
                   : timerState === 'warning'
                     ? 'timer timer-warn'
                     : 'timer';
+              const courtSurfaceTimerClass =
+                match && (timerState === 'over' || timerState === 'warning')
+                  ? timerState === 'over'
+                    ? ' court-surface-timer-over'
+                    : ' court-surface-timer-warn'
+                  : '';
 
               return (
                 <article
@@ -2617,7 +2633,7 @@ export default function App() {
                   </div>
 
                   {court.match ? (
-                    <div className="match-card court-surface">
+                    <div className={`match-card court-surface${courtSurfaceTimerClass}`}>
                       <span className="kitchen-line top" aria-hidden="true" />
                       <span className="kitchen-line bottom" aria-hidden="true" />
                       <div className={timerClass}>

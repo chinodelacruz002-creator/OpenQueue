@@ -815,6 +815,56 @@ select {
   color: #b91c1c;
 }
 
+/* Timer urgency — full card background (public “Now playing”) */
+.public-card.court-public-card.public-court-card-timer-warn {
+  background: linear-gradient(145deg, #ffedd5 0%, #fff7ed 55%, #ffffff 100%);
+  border-color: #fb923c;
+  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.35);
+}
+
+.public-card.court-public-card.public-court-card-timer-over {
+  background: linear-gradient(145deg, #fee2e2 0%, #fef2f2 55%, #ffffff 100%);
+  border-color: #f87171;
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.4);
+}
+
+/* Timer urgency — play surface (admin court) */
+.court-surface.court-surface-timer-warn {
+  background: linear-gradient(160deg, #ffedd5 0%, #fffbef 50%, #fff7ed 100%);
+  border-color: rgba(234, 88, 12, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(251, 146, 60, 0.25);
+}
+
+.court-surface.court-surface-timer-warn::before {
+  border-color: rgba(234, 88, 12, 0.28);
+}
+
+.court-surface.court-surface-timer-warn::after {
+  border-top-color: rgba(234, 88, 12, 0.22);
+}
+
+.court-surface.court-surface-timer-warn .kitchen-line {
+  border-top-color: rgba(234, 88, 12, 0.22);
+}
+
+.court-surface.court-surface-timer-over {
+  background: linear-gradient(160deg, #fee2e2 0%, #fff5f5 50%, #fef2f2 100%);
+  border-color: rgba(220, 38, 38, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.3);
+}
+
+.court-surface.court-surface-timer-over::before {
+  border-color: rgba(220, 38, 38, 0.32);
+}
+
+.court-surface.court-surface-timer-over::after {
+  border-top-color: rgba(220, 38, 38, 0.28);
+}
+
+.court-surface.court-surface-timer-over .kitchen-line {
+  border-top-color: rgba(220, 38, 38, 0.26);
+}
+
 .lock-note {
   margin-top: 0.5rem;
 }
