@@ -2493,12 +2493,9 @@ export default function App() {
             <h1>OpenQueue</h1>
             <p>
               {sessionDate}. Live queue
-              {showPublicRanking ? ' and standings' : ''}. Ask staff for the admin link; this page is
-              read-only.
+              {showPublicRanking ? ' and standings' : ''}. Ask staff for the admin link — this view
+              is read-only.
             </p>
-          </div>
-          <div className="public-kiosk-status">
-            <span>{saveStatus}</span>
           </div>
         </section>
         <div className="public-nav view-toggle">
@@ -2618,8 +2615,7 @@ export default function App() {
         <section className="admin-board">
           <section className="admin-actions panel">
             <div>
-              <strong>Open Play for {sessionDate}</strong>
-              <span className="save-status-muted">{saveStatus}</span>
+              <strong>Open play · {sessionDate}</strong>
             </div>
             <div className="inline-actions">
               <button

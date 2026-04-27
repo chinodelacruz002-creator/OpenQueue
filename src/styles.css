@@ -219,7 +219,7 @@ button {
 }
 
 .hero-slim {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   padding: 1.4rem 1.75rem;
 }
 
@@ -661,6 +661,11 @@ select {
   color: hsl(var(--destructive-foreground));
   background: hsl(var(--destructive) / 0.12);
   border-color: hsl(var(--destructive) / 0.3);
+}
+
+a.ghost-button,
+a.primary-button {
+  text-decoration: none;
 }
 
 .queue-card,
