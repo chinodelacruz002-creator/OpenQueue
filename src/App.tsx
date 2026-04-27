@@ -416,6 +416,9 @@ export default function App() {
     ],
   );
 
+  const buildAppDataRef = useRef(buildAppData);
+  buildAppDataRef.current = buildAppData;
+
   const flushSave = useCallback(
     async (saveTrigger = 'debounced_state_change') => {
       if (isLockedPublicView) {
@@ -1202,31 +1205,37 @@ export default function App() {
       detail: { courtId, matchId: match.id, playerIds: groupPlayerIds },
     });
 
-    setCourts((currentCourts) =>
-      currentCourts.map((court) =>
-        court.id === courtId
-          ? {
-              ...court,
-              status: 'playing',
-              match: { ...match, startedAt: Date.now() },
-            }
-          : court,
-      ),
-    );
+    flushSync(() => {
+      setCourts((currentCourts) =>
+        currentCourts.map((c) =>
+          c.id === courtId
+            ? {
+                ...c,
+                status: 'playing',
+                match: { ...match, startedAt: Date.now() },
+              }
+            : c,
+        ),
+      );
 
-    setPlayers((currentPlayers) =>
-      currentPlayers.map((player) => {
-        if (!groupPlayerIds.includes(player.id)) {
-          return player;
-        }
+      setPlayers((currentPlayers) =>
+        currentPlayers.map((player) => {
+          if (!groupPlayerIds.includes(player.id)) {
+            return player;
+          }
 
-        return {
-          ...player,
-          arrivalStatus: 'playing',
-          joinedQueueAt: null,
-        };
-      }),
-    );
+          return {
+            ...player,
+            arrivalStatus: 'playing',
+            joinedQueueAt: null,
+          };
+        }),
+      );
+    });
+
+    if (!isLockedPublicView && !isRegisterView) {
+      writeOptimisticMirror(buildAppDataRef.current());
+    }
     schedulePersistAfterMutation('assign_group_to_court');
   };
 
@@ -1292,6 +1301,13 @@ export default function App() {
       return;
     }
 
+    if (court.match.winnerIds.length !== 2) {
+      logUserAction('close_match', 'court.save_results', 'skipped', {
+        detail: { courtId, reason: 'need_two_winners' },
+      });
+      return;
+    }
+
     logUserAction('close_match', 'court.save_results', 'applied', {
       detail: {
         courtId,
@@ -1340,25 +1356,25 @@ export default function App() {
       return next;
     });
 
-    setPlayers((currentPlayers) => {
-      const keptPlayers = currentPlayers.filter((p) => !matchPlayerIds.includes(p.id));
-      const returningWinners: Player[] = [];
-      const returningLosers: Player[] = [];
+    const keptPlayers = players.filter((p) => !matchPlayerIds.includes(p.id));
+    const returningWinners: Player[] = [];
+    const returningLosers: Player[] = [];
 
-      for (const playerId of matchPlayerIds) {
-        const updated = sessionUpdates.get(playerId);
-        if (!updated) {
-          continue;
-        }
-        if (winnerIds.has(playerId)) {
-          returningWinners.push(updated);
-        } else {
-          returningLosers.push(updated);
-        }
+    for (const playerId of matchPlayerIds) {
+      const updated = sessionUpdates.get(playerId);
+      if (!updated) {
+        continue;
       }
+      if (winnerIds.has(playerId)) {
+        returningWinners.push(updated);
+      } else {
+        returningLosers.push(updated);
+      }
+    }
 
-      return [...keptPlayers, ...returningWinners, ...returningLosers];
-    });
+    const nextPlayers = [...keptPlayers, ...returningWinners, ...returningLosers];
+    setPlayers(nextPlayers);
+    setQueueManualOrder(nextPlayers.map((p) => p.id));
 
     updateCourt(courtId, { status: 'ready', match: null });
     schedulePersistAfterMutation('close_match');
@@ -2038,7 +2054,10 @@ export default function App() {
                     </span>
                   ))}
                 </span>
-                <small>Neutral players first, then winners, then losers.</small>
+                <small>
+                  After each match, players who were waiting move ahead in the queue so they get
+                  the next open spots.
+                </small>
               </article>
             ) : null}
 
@@ -2551,6 +2570,13 @@ export default function App() {
                         {court.status === 'playing' && (
                           <button
                             className="primary-button small"
+                            type="button"
+                            disabled={court.match.winnerIds.length !== 2}
+                            title={
+                              court.match.winnerIds.length === 2
+                                ? 'Save this match and return players to the queue'
+                                : 'Select exactly two winners first (2v2).'
+                            }
                             onClick={(event) => {
                               event.stopPropagation();
                               closeMatch(court.id);
@@ -2597,9 +2623,9 @@ export default function App() {
               <h2>Standby queue</h2>
             </div>
             <p className="hint">
-              Four group slots in a row (four players per group). Drag a full group to a free ready
-              court; the timer starts when the group lands. Drag a player onto another waiting
-              player to swap order and regroup.
+              Four group slots; each group lists one player per row. Drag a full group of four to a
+              free ready court (timer starts on drop). Drag a player onto another waiting player to
+              swap order and regroup.
             </p>
 
             <div className="queue-grid queue-grid-standby">
