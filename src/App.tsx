@@ -27,6 +27,7 @@ import {
   loadOpenPlayData,
   saveOpenPlayData,
   subscribeOpenPlayRealtime,
+  writeOptimisticMirror,
 } from './storage';
 import type {
   AppData,
@@ -276,7 +277,10 @@ export default function App() {
 
       setIsSaving(true);
 
-      const promise = saveOpenPlayData(buildAppData())
+      const snapshot = buildAppData();
+      writeOptimisticMirror(snapshot);
+
+      const promise = saveOpenPlayData(snapshot)
         .then(() => {
           setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
         })
