@@ -30,6 +30,7 @@ import {
   getLevelRange,
   normalizePhoneDigits,
 } from './constants';
+import { PublicQueueQr } from './PublicQueueQr';
 import {
   createGroupsFromAvailablePlayers,
   formatElapsedTime,
@@ -237,6 +238,24 @@ const mergeSavedAfterMatch = (
 /** Today’s session: wins, losses, games played (no ranking score in UI). */
 const sessionDayRecordLabel = (player: Player) =>
   `${player.wins}W-${player.losses}L · ${player.gamesPlayed} games today`;
+
+const PLAYER_STATUS_PUBLIC: Record<Player['arrivalStatus'], string> = {
+  present: 'Waiting in line',
+  assigned: 'In a standby group',
+  playing: 'On court',
+  away: 'Away',
+  left: 'Left',
+};
+
+const groupLevelRangeLabel = (list: Player[]) => {
+  if (list.length === 0) {
+    return '—';
+  }
+  const levels = list.map((p) => p.level);
+  const min = Math.min(...levels);
+  const max = Math.max(...levels);
+  return min === max ? `Level ${min}` : `Levels ${min}–${max}`;
+};
 
 const groupClassName = (canUseSelectedCourt: boolean) =>
   canUseSelectedCourt ? 'queue-card compatible' : 'queue-card';
@@ -2023,9 +2042,23 @@ export default function App() {
       myPlayer?.joinedQueueAt && myPlayer.arrivalStatus === 'present'
         ? Math.max(0, Math.floor((now - myPlayer.joinedQueueAt) / 1000))
         : 0;
+    const publicQueueFullUrl = (() => {
+      const u = new URL(window.location.href);
+      u.searchParams.set('view', 'player');
+      u.hash = '';
+      return u.href;
+    })();
+    const myPlayerCourt = myPlayer
+      ? (courts.find(
+          (c) => c.match && c.match.players.some((p) => p.id === myPlayer.id),
+        ) ?? null)
+      : null;
 
     return (
       <section className="player-view">
+        <div className="public-queue-qr-wrap">
+          <PublicQueueQr url={publicQueueFullUrl} />
+        </div>
         {!isLockedPublicView && (
           <p className="public-view-link-row">
             <a className="ghost-button" href={standingsUrl}>
@@ -2175,17 +2208,40 @@ export default function App() {
           <section className="panel you-panel">
             <div className="panel-title">
               <CheckCircle2 />
-              <h2>You ({myPlayer.name})</h2>
+              <h2>
+                You: <span className="you-panel-name">{myPlayer.name}</span>
+              </h2>
             </div>
             <div className="public-list">
-              <article className="public-card">
-                <strong>Status</strong>
-                <span>{myPlayer.arrivalStatus}</span>
-                {myPlayer.arrivalStatus === 'present' && fifoIndex >= 0 ? (
-                  <small>
-                    Queue position (FIFO): #{fifoIndex + 1} of {fifoQueueOrder.length}
-                  </small>
+              <article className="public-card you-status-card">
+                <div className="you-status-row">
+                  <strong>Status</strong>
+                  <span className="you-status-value">
+                    {PLAYER_STATUS_PUBLIC[myPlayer.arrivalStatus]}
+                  </span>
+                </div>
+                {myPlayerCourt ? (
+                  <p className="you-playing-where">
+                    <strong>Playing on:</strong> {myPlayerCourt.name}
+                    {myPlayerCourt.status === 'loaded' &&
+                    myPlayerCourt.match &&
+                    !myPlayerCourt.match.startedAt ? (
+                      <span className="you-playing-note"> (timer not started yet)</span>
+                    ) : null}
+                  </p>
                 ) : null}
+                {myPlayer.arrivalStatus === 'playing' && !myPlayerCourt ? (
+                  <p className="you-playing-where you-playing-where--fallback">
+                    If you do not see which court you are on, ask a staff member to confirm in the
+                    admin view.
+                  </p>
+                ) : null}
+                <small>
+                  {myPlayer.arrivalStatus === 'present' && fifoIndex >= 0
+                    ? `In line: #${fifoIndex + 1} of ${fifoQueueOrder.length} · `
+                    : ''}
+                  Level {myPlayer.level}
+                </small>
                 {myPlayer.arrivalStatus === 'present' && myPlayer.joinedQueueAt ? (
                   <small>Waiting about {formatElapsedTime(waitSeconds)}</small>
                 ) : null}
@@ -2213,15 +2269,41 @@ export default function App() {
             {nextGroups.length > 0 ? (
               <article className="public-card">
                 <strong>Standby groups (up to 4)</strong>
-                <span>
-                  {nextGroups.map((group, index) => (
-                    <span key={group.id}>
-                      #{index + 1}:{' '}
-                      {group.players.map((player) => player.name).join(', ') || '—'}
-                      {index === nextGroups.length - 1 ? '' : ' · '}
-                    </span>
-                  ))}
-                </span>
+                <div className="public-standby-groups">
+                  {nextGroups.map((group, index) => {
+                    const pl = group.players;
+                    const imIn = myPlayer && pl.some((p) => p.id === myPlayer.id);
+                    return (
+                      <p className="public-standby-group-line" key={group.id}>
+                        <span className="public-standby-group-label">#{index + 1}:</span>{' '}
+                        {pl.length ? (
+                          <>
+                            {pl.map((player, pi) => (
+                              <span key={player.id}>
+                                {pi > 0 ? ', ' : ''}
+                                <span
+                                  className={
+                                    myPlayer?.id === player.id
+                                      ? 'public-queue-name-self'
+                                      : undefined
+                                  }
+                                >
+                                  {player.name} (L{player.level})
+                                </span>
+                              </span>
+                            ))}
+                          </>
+                        ) : (
+                          '—'
+                        )}{' '}
+                        <span className="public-standby-group-levels">
+                          {imIn ? 'Includes you · ' : ''}
+                          {pl.length ? groupLevelRangeLabel(pl) : '—'}
+                        </span>
+                      </p>
+                    );
+                  })}
+                </div>
                 <small>
                   After each match, players who were waiting move ahead in the queue so they get
                   the next open spots.
@@ -2232,9 +2314,19 @@ export default function App() {
             {upNextPlayers.map((player, index) => (
               <article className="public-card" key={player.id}>
                 <strong>
-                  #{index + 1} {player.name}
+                  #{index + 1}{' '}
+                  <span
+                    className={myPlayer?.id === player.id ? 'public-queue-name-self' : undefined}
+                  >
+                    {player.name}
+                  </span>
                 </strong>
-                <span>In line (FIFO)</span>
+                <span>
+                  In line (FIFO) · L{player.level}
+                  {myPlayer && player.id === myPlayer.id
+                    ? ' · you'
+                    : ''}
+                </span>
                 {rankingOnPublic ? <small>{sessionDayRecordLabel(player)}</small> : null}
               </article>
             ))}

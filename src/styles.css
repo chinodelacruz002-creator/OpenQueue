@@ -2,19 +2,101 @@
   box-sizing: border-box;
 }
 
+/* Design tokens (shadcn-style HSL). Use .dark on <html> later to enable dark theme. */
 :root {
-  color: #142033;
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 187 38% 49%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 84 64% 72%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 24 95% 53%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 187 38% 49%;
+  --radius: 0.5rem;
+  --chart-1: 187 38% 49%;
+  --chart-2: 84 64% 72%;
+  --chart-3: 24 95% 53%;
+  --chart-4: 262 52% 47%;
+  --chart-5: 340 75% 55%;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
-  background: #eef4f8;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+}
+
+.dark {
+  --background: 222 47% 11%;
+  --foreground: 210 40% 98%;
+  --card: 217 33% 17%;
+  --card-foreground: 210 40% 98%;
+  --popover: 217 33% 17%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 187 38% 49%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 84 64% 72%;
+  --secondary-foreground: 0 0% 100%;
+  --muted: 217 33% 17%;
+  --muted-foreground: 215 20% 65%;
+  --accent: 24 95% 53%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 62% 30%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 217 33% 25%;
+  --input: 217 33% 25%;
+  --ring: 187 38% 49%;
+  --chart-1: 187 38% 49%;
+  --chart-2: 84 64% 72%;
+  --chart-3: 24 95% 53%;
+  --chart-4: 262 52% 47%;
+  --chart-5: 340 75% 55%;
+}
+
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 body {
   min-width: 320px;
   margin: 0;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+}
+
+::selection {
+  background-color: hsl(var(--primary) / 0.2);
+  color: hsl(var(--foreground));
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--primary) / 0.3);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.5);
 }
 
 button,
@@ -29,6 +111,7 @@ button {
 
 .app-shell {
   min-height: 100vh;
+  background: hsl(var(--background));
 }
 
 .hero {
@@ -36,16 +119,16 @@ button {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 1.5rem;
   padding: 2rem;
-  color: #ffffff;
-  background:
-    linear-gradient(135deg, rgba(13, 38, 65, 0.94), rgba(14, 116, 94, 0.88)),
-    radial-gradient(circle at top right, #6ee7b7, transparent 24rem);
+  color: hsl(var(--foreground));
+  background: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
+  box-shadow: 0 1px 0 hsl(var(--border) / 0.4);
 }
 
 .eyebrow {
   display: inline-block;
   margin-bottom: 0.6rem;
-  color: #a7f3d0;
+  color: hsl(var(--primary));
   font-size: 0.78rem;
   font-weight: 900;
   letter-spacing: 0.14em;
@@ -61,7 +144,7 @@ button {
 .hero-brand-line {
   max-width: 56rem;
   margin: 0.5rem 0 0;
-  color: #b8d4e8;
+  color: hsl(var(--muted-foreground));
   font-size: 0.82rem;
   line-height: 1.4;
 }
@@ -69,7 +152,7 @@ button {
 .hero p {
   max-width: 56rem;
   margin: 1rem 0 0;
-  color: #dceef7;
+  color: hsl(var(--muted-foreground));
   font-size: 1.05rem;
 }
 
@@ -83,10 +166,11 @@ button {
 .hero-stats div {
   min-width: 6rem;
   padding: 1rem;
-  color: #143044;
-  background: rgba(255, 255, 255, 0.93);
-  border-radius: 1rem;
-  box-shadow: 0 1rem 3rem rgba(3, 18, 32, 0.22);
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) * 1.4);
+  box-shadow: none;
 }
 
 .hero-stats strong,
@@ -101,7 +185,7 @@ button {
 
 .hero-stats span {
   margin-top: 0.35rem;
-  color: #66788a;
+  color: hsl(var(--muted-foreground));
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -112,23 +196,25 @@ button {
   justify-content: center;
   gap: 0.75rem;
   padding: 1rem 1rem 0;
+  background: hsl(var(--background));
 }
 
 .local-only-banner {
   margin: 0;
   padding: 0.9rem 1.5rem;
-  color: #7c2d12;
-  background: #ffedd5;
-  border-bottom: 1px solid #fdba74;
+  color: hsl(var(--accent-foreground));
+  background: hsl(var(--accent) / 0.12);
+  border-bottom: 1px solid hsl(var(--border));
   font-size: 0.9rem;
   line-height: 1.45;
 }
 
 .local-only-banner code {
   padding: 0 0.2rem;
-  color: #9a3412;
-  background: rgba(255, 255, 255, 0.8);
-  border-radius: 0.25rem;
+  color: hsl(var(--foreground));
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
   font-size: 0.85em;
 }
 
@@ -142,13 +228,7 @@ button {
 }
 
 .public-kiosk-status {
-  align-self: center;
-  padding: 0.65rem 1rem;
-  color: #143044;
-  font-size: 0.85rem;
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 0.75rem;
+  display: none;
 }
 
 .public-nav {
@@ -166,9 +246,10 @@ button {
 .bulk-error {
   margin: 0 0 1rem;
   padding: 0.6rem 0.75rem;
-  color: #7f1d1d;
-  background: #fee2e2;
-  border-radius: 0.4rem;
+  color: hsl(var(--destructive-foreground));
+  background: hsl(var(--destructive) / 0.12);
+  border: 1px solid hsl(var(--destructive) / 0.25);
+  border-radius: var(--radius);
   font-size: 0.9rem;
 }
 
@@ -186,11 +267,11 @@ button {
 .standings-table td {
   padding: 0.5rem 0.65rem;
   text-align: left;
-  border-bottom: 1px solid #dbe4eb;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .standings-table th {
-  color: #475569;
+  color: hsl(var(--muted-foreground));
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -198,18 +279,18 @@ button {
 
 tr.roster-subhead td {
   padding: 0.75rem 0.4rem 0.35rem;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
   font-size: 0.78rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  background: #f0f4f8;
-  border-top: 1px solid #dbe4eb;
-  border-bottom: 1px solid #dbe4eb;
+  background: hsl(var(--muted));
+  border-top: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 tr.roster-inactive {
-  background: #fafbfc;
+  background: hsl(var(--muted) / 0.4);
 }
 
 .player-view {
@@ -223,6 +304,138 @@ tr.roster-inactive {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.public-queue-qr-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+}
+
+.public-queue-qr {
+  display: grid;
+  justify-items: center;
+  gap: 0.4rem;
+  max-width: 22rem;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) * 1.4);
+}
+
+.public-queue-qr__img {
+  display: block;
+  border-radius: var(--radius);
+}
+
+.public-queue-qr__placeholder {
+  display: grid;
+  place-items: center;
+  width: 180px;
+  height: 180px;
+  background: hsl(var(--muted));
+  border-radius: var(--radius);
+}
+
+.public-queue-qr__spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 3px solid hsl(var(--border));
+  border-top-color: hsl(var(--primary));
+  border-radius: 50%;
+  animation: public-qr-spin 0.9s linear infinite;
+}
+
+@keyframes public-qr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.public-queue-qr__caption {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+}
+
+.public-queue-qr__url {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.public-queue-qr__url a {
+  color: hsl(var(--primary));
+}
+
+.you-panel-name {
+  font-weight: 900;
+  color: hsl(var(--foreground));
+}
+
+.you-status-card {
+  gap: 0.5rem;
+}
+
+.you-status-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.you-status-value {
+  font-weight: 800;
+  color: hsl(var(--primary));
+}
+
+.you-playing-where {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: hsl(var(--foreground));
+}
+
+.you-playing-note {
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+}
+
+.you-playing-where--fallback {
+  font-size: 0.86rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.public-queue-name-self {
+  font-weight: 900;
+  color: hsl(var(--primary));
+}
+
+.public-standby-groups {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.public-standby-group-line {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: hsl(var(--card-foreground));
+}
+
+.public-standby-group-label {
+  font-weight: 800;
+  color: hsl(var(--foreground));
+}
+
+.public-standby-group-levels {
+  font-size: 0.82rem;
+  color: hsl(var(--muted-foreground));
+  font-weight: 600;
+}
+
 .public-list {
   display: grid;
   gap: 0.75rem;
@@ -232,9 +445,10 @@ tr.roster-inactive {
   display: grid;
   gap: 0.35rem;
   padding: 0.9rem;
-  background: #ffffff;
-  border: 1px solid #d9e6ef;
-  border-radius: 1rem;
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) * 1.4);
 }
 
 .public-card strong,
@@ -245,7 +459,7 @@ tr.roster-inactive {
 
 .public-card span,
 .public-card small {
-  color: #66788a;
+  color: hsl(var(--muted-foreground));
 }
 
 .public-court-teams {
@@ -298,6 +512,7 @@ tr.roster-inactive {
   display: grid;
   gap: 1rem;
   padding: 1rem;
+  background: hsl(var(--background));
 }
 
 .admin-actions {
@@ -314,12 +529,8 @@ tr.roster-inactive {
 
 .admin-actions span {
   margin-top: 0.2rem;
-  color: #66788a;
+  color: hsl(var(--muted-foreground));
   font-size: 0.86rem;
-}
-
-.save-status-muted {
-  display: none;
 }
 
 .inline-actions {
@@ -356,10 +567,10 @@ tr.roster-inactive {
   display: inline-flex;
   align-items: center;
   padding: 0.25rem 0.55rem;
-  background: #ffffff;
-  border: 1px solid #d9e6ef;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 999px;
-  color: #2c536d;
+  color: hsl(var(--foreground));
   font-size: 0.8rem;
   font-weight: 700;
 }
@@ -367,10 +578,11 @@ tr.roster-inactive {
 .panel {
   align-self: start;
   padding: 1rem;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #dce7ef;
-  border-radius: 1.25rem;
-  box-shadow: 0 1rem 2.5rem rgba(25, 55, 82, 0.08);
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) * 1.4);
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.04);
 }
 
 .panel-title {
@@ -385,7 +597,7 @@ tr.roster-inactive {
 }
 
 .panel-title svg {
-  color: #0f766e;
+  color: hsl(var(--primary));
 }
 
 .panel h2,
@@ -395,13 +607,13 @@ tr.roster-inactive {
 
 .hint {
   margin: 0 0 1rem;
-  color: #66788a;
+  color: hsl(var(--muted-foreground));
 }
 
 label {
   display: grid;
   gap: 0.35rem;
-  color: #43556a;
+  color: hsl(var(--foreground));
   font-size: 0.84rem;
   font-weight: 800;
 }
@@ -410,10 +622,10 @@ input,
 select {
   width: 100%;
   padding: 0.72rem 0.8rem;
-  color: #172033;
-  background: #f8fbfd;
-  border: 1px solid #cddce8;
-  border-radius: 0.75rem;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius);
 }
 
 .form-grid,
@@ -439,8 +651,13 @@ select {
 }
 
 .primary-button {
-  color: #ffffff;
-  background: #087f5b;
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+}
+
+.primary-button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }
 
 .primary-button.small {
@@ -454,33 +671,41 @@ select {
 }
 
 .ghost-button {
-  color: #2c536d;
-  background: #edf4fa;
+  color: hsl(var(--secondary-foreground));
+  background: hsl(var(--secondary) / 0.35);
+  border: 1px solid hsl(var(--border));
+}
+
+.ghost-button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }
 
 .ghost-button.danger {
-  color: #9a3412;
-  background: #ffedd5;
+  color: hsl(var(--destructive-foreground));
+  background: hsl(var(--destructive) / 0.12);
+  border-color: hsl(var(--destructive) / 0.3);
 }
 
 .queue-card,
 .court-card,
 .roster-card,
 .suggestion-card {
-  border: 1px solid #d9e6ef;
-  border-radius: 1rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) * 1.4);
 }
 
 .queue-card {
   display: grid;
   gap: 0.75rem;
   padding: 0.85rem;
-  background: #ffffff;
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
 }
 
 .queue-card.compatible {
-  border-color: #34d399;
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+  border-color: hsl(var(--chart-2) / 0.85);
+  box-shadow: 0 0 0 2px hsl(var(--chart-2) / 0.25);
 }
 
 .queue-card-header,
@@ -509,7 +734,7 @@ select {
 .roster-card small,
 .roster-card span,
 .compatibility-list {
-  color: #66788a;
+  color: hsl(var(--muted-foreground));
 }
 
 .player-stack {
@@ -524,8 +749,8 @@ select {
 
 .player-chip {
   padding: 0.55rem;
-  background: #f5f8fb;
-  border-radius: 0.8rem;
+  background: hsl(var(--muted));
+  border-radius: var(--radius);
 }
 
 .player-chip span:first-child {
@@ -536,7 +761,7 @@ select {
 .player-chip-level {
   font-size: 0.72rem;
   font-weight: 900;
-  color: #0f766e;
+  color: hsl(var(--primary));
   letter-spacing: 0.02em;
 }
 
@@ -551,15 +776,15 @@ select {
 .suggestion-card {
   justify-content: flex-start;
   width: 100%;
-  color: #17445f;
+  color: hsl(var(--foreground));
   text-align: left;
-  background: #eaf7f1;
-  border-color: #bbefd6;
-  border-radius: 1rem;
+  background: hsl(var(--primary) / 0.08);
+  border-color: hsl(var(--primary) / 0.25);
+  border-radius: calc(var(--radius) * 1.4);
 }
 
 .suggestion-card span {
-  color: #4f6578;
+  color: hsl(var(--muted-foreground));
   font-weight: 700;
 }
 
@@ -605,7 +830,8 @@ select {
   gap: 0.9rem;
   padding: 1rem;
   border-width: 2px;
-  box-shadow: 0 1rem 2.5rem rgba(25, 55, 82, 0.08);
+  background: hsl(var(--card));
+  box-shadow: 0 1px 3px hsl(var(--foreground) / 0.06);
 }
 
 .court-grid-compact .court-card {
@@ -661,11 +887,13 @@ select {
   grid-template-rows: auto 1fr;
   gap: 0.65rem;
   padding: 0.75rem;
-  border-radius: 0.95rem;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.55)),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.06));
-  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: var(--radius);
+  background: linear-gradient(
+    180deg,
+    hsl(var(--muted) / 0.6) 0%,
+    hsl(var(--card)) 100%
+  );
+  border: 1px solid hsl(var(--border));
   overflow: hidden;
 }
 
@@ -673,8 +901,8 @@ select {
   content: '';
   position: absolute;
   inset: 0.65rem;
-  border-radius: 0.75rem;
-  border: 2px solid rgba(15, 23, 42, 0.18);
+  border-radius: var(--radius);
+  border: 2px solid hsl(var(--border));
   pointer-events: none;
 }
 
@@ -685,7 +913,7 @@ select {
   right: 0.65rem;
   top: 50%;
   height: 0;
-  border-top: 2px solid rgba(15, 23, 42, 0.14);
+  border-top: 2px solid hsl(var(--border));
   transform: translateY(-1px);
   pointer-events: none;
 }
@@ -695,7 +923,7 @@ select {
   left: 0.65rem;
   right: 0.65rem;
   height: 0;
-  border-top: 2px dashed rgba(15, 23, 42, 0.14);
+  border-top: 2px dashed hsl(var(--muted-foreground) / 0.35);
   pointer-events: none;
 }
 
@@ -724,36 +952,36 @@ select {
 
 .match-player-card {
   padding: 0.55rem 0.6rem;
-  background: rgba(248, 251, 253, 0.9);
-  border: 1px solid #d9e6ef;
-  border-radius: 0.8rem;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
 }
 
 .court-card.ready,
 .court-card.selected {
-  background: linear-gradient(180deg, #dcfce7, #f0fdf4);
-  border-color: #16a34a;
+  background: linear-gradient(180deg, hsl(142 76% 94%), hsl(142 76% 98%));
+  border-color: hsl(142 76% 36%);
 }
 
 .court-card.reserved {
-  background: linear-gradient(180deg, #ffedd5, #fff7ed);
-  border-color: #f97316;
+  background: linear-gradient(180deg, hsl(var(--accent) / 0.12), hsl(var(--card)));
+  border-color: hsl(var(--accent));
 }
 
 .court-card.loaded {
-  background: linear-gradient(180deg, #dbeafe, #eff6ff);
-  border-color: #2563eb;
+  background: linear-gradient(180deg, hsl(217 91% 94%), hsl(var(--card)));
+  border-color: hsl(217 91% 60%);
 }
 
 .court-card.playing {
-  background: linear-gradient(180deg, #ccfbf1, #f0fdfa);
-  border-color: #0d9488;
+  background: linear-gradient(180deg, hsl(var(--primary) / 0.12), hsl(var(--card)));
+  border-color: hsl(var(--primary));
 }
 
 .court-card.unavailable {
-  background: linear-gradient(180deg, #fee2e2, #fef2f2);
-  border-color: #dc2626;
-  opacity: 0.88;
+  background: linear-gradient(180deg, hsl(var(--destructive) / 0.1), hsl(var(--card)));
+  border-color: hsl(var(--destructive));
+  opacity: 0.95;
 }
 
 .court-header input {
@@ -767,7 +995,7 @@ select {
 .court-header span {
   display: block;
   margin-top: 0.25rem;
-  color: #66788a;
+  color: hsl(var(--muted-foreground));
   font-size: 0.82rem;
 }
 
@@ -775,8 +1003,8 @@ select {
   display: grid;
   gap: 0.65rem;
   padding: 0.75rem;
-  background: #f8fbfd;
-  border-radius: 0.95rem;
+  background: hsl(var(--muted) / 0.5);
+  border-radius: var(--radius);
 }
 
 .timer {
@@ -785,34 +1013,34 @@ select {
   gap: 0.45rem;
   font-size: 1.25rem;
   font-weight: 900;
-  color: #0f172a;
+  color: hsl(var(--foreground));
 }
 
 /* Last 60s before max — warning (orange) */
 .timer.timer-warn,
 .timer-warn {
-  color: #c2410c;
+  color: hsl(var(--accent));
   font-weight: 900;
 }
 
 /* Past max time — over (red) */
 .timer.timer-over,
 .timer-over {
-  color: #b91c1c;
+  color: hsl(var(--destructive));
   font-weight: 900;
 }
 
 .public-court-timer {
   font-weight: 800;
-  color: #334155;
+  color: hsl(var(--muted-foreground));
 }
 
 .public-court-timer-warn {
-  color: #c2410c;
+  color: hsl(var(--accent));
 }
 
 .public-court-timer-over {
-  color: #b91c1c;
+  color: hsl(var(--destructive));
 }
 
 /* Timer urgency — full card background (public “Now playing”) */
