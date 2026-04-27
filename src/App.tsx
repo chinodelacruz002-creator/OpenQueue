@@ -10,7 +10,15 @@ import {
   UsersRound,
   X,
 } from 'lucide-react';
-import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  DragEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { flushSync } from 'react-dom';
 import { logUserInteraction, type UserActionLogStatus } from './actionLog';
 import {
@@ -35,6 +43,7 @@ import {
   migrateAppData,
   saveOpenPlayData,
   subscribeOpenPlayRealtime,
+  syncMirrorToApp,
   writeOptimisticMirror,
 } from './storage';
 import type {
@@ -83,23 +92,7 @@ interface BulkPlayerRow extends PlayerForm {
   playerId: string | null;
 }
 
-/** Distribute row-major order into N table columns (equal split). */
-const splitRowsIntoTableColumns = (rows: BulkPlayerRow[], columnCount: number): BulkPlayerRow[][] => {
-  const n = rows.length;
-  if (n === 0) {
-    return Array.from({ length: columnCount }, () => []);
-  }
-  const out: BulkPlayerRow[][] = [];
-  for (let c = 0; c < columnCount; c += 1) {
-    const start = Math.floor((c * n) / columnCount);
-    const end = Math.floor(((c + 1) * n) / columnCount);
-    out.push(rows.slice(start, end));
-  }
-  return out;
-};
-
 const BULK_MIN_ROWS = 10;
-const BULK_TABLE_COLUMN_COUNT = 4;
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
@@ -357,6 +350,8 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const flushSaveRef = useRef<(trigger?: string) => Promise<void>>(async () => {});
+  /** When true, the next layout pass is from `applyLoad` (network), not a local admin edit. */
+  const applyLoadInProgressRef = useRef(false);
   const [now, setNow] = useState(0);
   const [showPublicRanking, setShowPublicRanking] = useState(true);
   const [adminUnlocked, setAdminUnlocked] = useState(
@@ -633,6 +628,7 @@ export default function App() {
   };
 
   const applyLoad = useCallback((data: AppData | null, kind: 'initial' | 'sync') => {
+    applyLoadInProgressRef.current = true;
     const appData = migrateAppData(data ?? createAppData());
     setSessionDate(appData.sessionDate || todayKey());
     setPlayers(appData.players ?? []);
@@ -735,6 +731,22 @@ export default function App() {
       setPublicLookupMessage('That phone is not on today’s list yet. Register first.');
     }
   }, [isLockedPublicView, players, sessionDate]);
+
+  // Keep the Supabase mirror in sync on every local commit (layout) so fetches can skip
+  // clobbering with stale server rows. Do not bump persistenceGen after `applyLoad` — that
+  // would look like an unsaved draft and block cross-client updates.
+  useLayoutEffect(() => {
+    if (isLockedPublicView || isRegisterView) {
+      return;
+    }
+    const snapshot = buildAppData();
+    if (applyLoadInProgressRef.current) {
+      applyLoadInProgressRef.current = false;
+      syncMirrorToApp(snapshot);
+      return;
+    }
+    writeOptimisticMirror(snapshot);
+  }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, queueManualOrder, savedPlayers, sessionDate, showPublicRanking, buildAppData]);
 
   useEffect(() => {
     if (isLockedPublicView || isRegisterView) {
@@ -852,19 +864,6 @@ export default function App() {
       }),
     [savedPlayers],
   );
-
-  const bulkColumnRows = useMemo(
-    () => splitRowsIntoTableColumns(bulkRows, BULK_TABLE_COLUMN_COUNT),
-    [bulkRows],
-  );
-  const bulkColumnRowOffsets = useMemo(() => {
-    let acc = 0;
-    return bulkColumnRows.map((col) => {
-      const start = acc;
-      acc += col.length;
-      return start;
-    });
-  }, [bulkColumnRows]);
 
   const updateBulkRow = (
     rowId: string,
@@ -1644,135 +1643,131 @@ export default function App() {
         {bulkAddError ? <p className="bulk-error" role="alert">{bulkAddError}</p> : null}
 
         <div className="bulk-table-groups">
-          {bulkColumnRows.map((columnRows, columnIndex) => (
-            <div className="bulk-table-wrap" key={`bulk-column-${columnIndex + 1}`}>
-              <table className="bulk-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Player</th>
-                    <th>Lvl</th>
-                    <th>Min</th>
-                    <th>Max</th>
-                    <th>Paddle</th>
-                    <th>Phone</th>
-                    <th>Status</th>
-                    <th />
+          <div className="bulk-table-wrap">
+            <table className="bulk-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Player</th>
+                  <th>Lvl</th>
+                  <th>Min</th>
+                  <th>Max</th>
+                  <th>Paddle</th>
+                  <th>Phone</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {bulkRows.map((row, rowIndex) => (
+                  <tr key={row.rowId}>
+                    <td className="bulk-row-number">{rowIndex + 1}</td>
+                    <td>
+                      <input
+                        list="bulk-saved-player-names"
+                        value={row.name}
+                        onChange={(event) =>
+                          onBulkFieldChange(row.rowId, 'name', () =>
+                            updateBulkName(row.rowId, event.target.value),
+                          )
+                        }
+                        placeholder="Player"
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={row.level}
+                        onChange={(event) =>
+                          onBulkFieldChange(row.rowId, 'level', () =>
+                            updateBulkLevel(row.rowId, Number(event.target.value)),
+                          )
+                        }
+                      >
+                        {LEVELS.map((level) => (
+                          <option value={level} key={level}>
+                            {level}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={row.minLevel}
+                        onChange={(event) =>
+                          onBulkFieldChange(row.rowId, 'minLevel', () =>
+                            updateBulkRow(row.rowId, {
+                              minLevel: Number(event.target.value),
+                            }),
+                          )
+                        }
+                      >
+                        {LEVELS.map((level) => (
+                          <option value={level} key={level}>
+                            {level}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={row.maxLevel}
+                        onChange={(event) =>
+                          onBulkFieldChange(row.rowId, 'maxLevel', () =>
+                            updateBulkRow(row.rowId, {
+                              maxLevel: Number(event.target.value),
+                            }),
+                          )
+                        }
+                      >
+                        {LEVELS.map((level) => (
+                          <option value={level} key={level}>
+                            {level}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        list="paddle-options"
+                        value={row.paddle}
+                        onChange={(event) =>
+                          onBulkFieldChange(row.rowId, 'paddle', () =>
+                            updateBulkRow(row.rowId, { paddle: event.target.value }),
+                          )
+                        }
+                        placeholder="Paddle"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={row.phone}
+                        onChange={(event) =>
+                          onBulkFieldChange(row.rowId, 'phone', () =>
+                            updateBulkRow(row.rowId, { phone: event.target.value }),
+                          )
+                        }
+                        placeholder="Optional"
+                        inputMode="tel"
+                        autoComplete="tel"
+                      />
+                    </td>
+                    <td>
+                      {row.name.trim() ? <span className="bulk-status">Ready</span> : null}
+                    </td>
+                    <td>
+                      <button
+                        className="ghost-button danger compact-button"
+                        type="button"
+                        onClick={() => clearBulkRow(row.rowId)}
+                      >
+                        X
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {columnRows.map((row, rowIndex) => (
-                    <tr key={row.rowId}>
-                      <td className="bulk-row-number">
-                        {(bulkColumnRowOffsets[columnIndex] ?? 0) + rowIndex + 1}
-                      </td>
-                      <td>
-                        <input
-                          list="bulk-saved-player-names"
-                          value={row.name}
-                          onChange={(event) =>
-                            onBulkFieldChange(row.rowId, 'name', () =>
-                              updateBulkName(row.rowId, event.target.value),
-                            )
-                          }
-                          placeholder="Player"
-                        />
-                      </td>
-                      <td>
-                        <select
-                          value={row.level}
-                          onChange={(event) =>
-                            onBulkFieldChange(row.rowId, 'level', () =>
-                              updateBulkLevel(row.rowId, Number(event.target.value)),
-                            )
-                          }
-                        >
-                          {LEVELS.map((level) => (
-                            <option value={level} key={level}>
-                              {level}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          value={row.minLevel}
-                          onChange={(event) =>
-                            onBulkFieldChange(row.rowId, 'minLevel', () =>
-                              updateBulkRow(row.rowId, {
-                                minLevel: Number(event.target.value),
-                              }),
-                            )
-                          }
-                        >
-                          {LEVELS.map((level) => (
-                            <option value={level} key={level}>
-                              {level}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          value={row.maxLevel}
-                          onChange={(event) =>
-                            onBulkFieldChange(row.rowId, 'maxLevel', () =>
-                              updateBulkRow(row.rowId, {
-                                maxLevel: Number(event.target.value),
-                              }),
-                            )
-                          }
-                        >
-                          {LEVELS.map((level) => (
-                            <option value={level} key={level}>
-                              {level}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          list="paddle-options"
-                          value={row.paddle}
-                          onChange={(event) =>
-                            onBulkFieldChange(row.rowId, 'paddle', () =>
-                              updateBulkRow(row.rowId, { paddle: event.target.value }),
-                            )
-                          }
-                          placeholder="Paddle"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={row.phone}
-                          onChange={(event) =>
-                            onBulkFieldChange(row.rowId, 'phone', () =>
-                              updateBulkRow(row.rowId, { phone: event.target.value }),
-                            )
-                          }
-                          placeholder="Optional"
-                          inputMode="tel"
-                          autoComplete="tel"
-                        />
-                      </td>
-                      <td>
-                        {row.name.trim() ? <span className="bulk-status">Ready</span> : null}
-                      </td>
-                      <td>
-                        <button
-                          className="ghost-button danger compact-button"
-                          type="button"
-                          onClick={() => clearBulkRow(row.rowId)}
-                        >
-                          X
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
+                ))}
+              </tbody>
+            </table>
+          </div>
           <datalist id="bulk-saved-player-names">
             {savedPlayers.map((player) => (
               <option value={player.name} key={player.id} />

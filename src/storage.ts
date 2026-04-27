@@ -238,16 +238,37 @@ export const writeOptimisticMirror = (data: AppData): void => {
   writeMirrorEnvelope(next);
 };
 
+/**
+ * Update mirror `app` only (keeps `persistenceGen` / `savedGen`). Use after a server-driven
+ * `applyLoad` so we do not fake an unsaved local revision.
+ */
+export const syncMirrorToApp = (data: AppData): void => {
+  const prev = readMirrorEnvelope();
+  if (!prev) {
+    writeOptimisticMirror(migrateAppData(data));
+    return;
+  }
+  writeMirrorEnvelope({
+    ...prev,
+    app: migrateAppData(data),
+  });
+};
+
 const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
   if (!supabase) {
     return null;
   }
 
   const mirrorBeforeFetch = readMirrorEnvelope();
-  /** Local state was updated (writeOptimisticMirror) before the server confirmed it — do not replace with a stale network row. */
+  /**
+   * Local state was written to the mirror before the last successful save — do not clobber
+   * admin edits with a stale `open_play_state` row. Skip only after we have any server
+   * `updated_at` in the mirror so the first load can still hydrate from the network.
+   */
   if (
     mirrorBeforeFetch &&
-    mirrorBeforeFetch.persistenceGen > mirrorBeforeFetch.savedGen
+    mirrorBeforeFetch.persistenceGen > mirrorBeforeFetch.savedGen &&
+    mirrorBeforeFetch.serverUpdatedAt
   ) {
     return mirrorBeforeFetch.app;
   }
