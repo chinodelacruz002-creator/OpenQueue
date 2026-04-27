@@ -137,7 +137,9 @@ export const appendSelfRegisteredPlayer = async (
     };
 
     try {
-      await saveOpenPlayData(next);
+      writeOptimisticMirror(next);
+      const persistenceGenAtSave = getPersistenceGenSnapshot().persistenceGen;
+      await saveOpenPlayData(next, persistenceGenAtSave);
       return { ok: true, playerId: playerToAdd.id };
     } catch {
       // Retry on conflict
@@ -368,7 +370,13 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
   return loadOpenPlayInFlight;
 };
 
-export const saveOpenPlayData = async (data: AppData): Promise<void> => {
+/**
+ * Persists to Supabase. `persistenceGenAtSave` must be the `persistenceGen` in the local mirror
+ * right after the same snapshot was written to the mirror (see `writeOptimisticMirror`). On
+ * success we advance `savedGen` only to that value and keep the latest `app` from the mirror so
+ * we never clobber newer in-memory / UI state with a stale saved payload.
+ */
+export const saveOpenPlayData = async (data: AppData, persistenceGenAtSave: number): Promise<void> => {
   if (!supabase) {
     saveLocalData(data);
     return;
@@ -413,13 +421,24 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
       ? String((stateResult.data as { updated_at: string }).updated_at)
       : new Date().toISOString();
 
-  const pending = readMirrorEnvelope();
-  const gen = pending?.persistenceGen ?? nextMirrorGeneration();
+  const current = readMirrorEnvelope();
+  if (!current) {
+    const merged = migrateAppData(data);
+    writeMirrorEnvelope({
+      v: MIRROR_VERSION,
+      app: merged,
+      persistenceGen: Math.max(persistenceGenAtSave, 1),
+      savedGen: persistenceGenAtSave,
+      serverUpdatedAt,
+    });
+    return;
+  }
+
   writeMirrorEnvelope({
     v: MIRROR_VERSION,
-    app: data,
-    persistenceGen: gen,
-    savedGen: gen,
+    app: current.app,
+    persistenceGen: current.persistenceGen,
+    savedGen: persistenceGenAtSave,
     serverUpdatedAt,
   });
 };

@@ -38,6 +38,7 @@ import {
 } from './scheduler';
 import {
   appendSelfRegisteredPlayer,
+  getPersistenceGenSnapshot,
   hasSupabaseConfig,
   loadOpenPlayData,
   migrateAppData,
@@ -437,8 +438,9 @@ export default function App() {
 
       const snapshot = buildAppData();
       writeOptimisticMirror(snapshot);
+      const persistenceGenAtSave = getPersistenceGenSnapshot().persistenceGen;
 
-      const promise = saveOpenPlayData(snapshot)
+      const promise = saveOpenPlayData(snapshot, persistenceGenAtSave)
         .then(() => {
           setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
         })
