@@ -844,6 +844,16 @@ export default function App() {
     return { rosterActive: active, rosterInactive: inactive };
   }, [players]);
 
+  const rosterNotOnCourt = useMemo(
+    () => rosterActive.filter((p) => p.arrivalStatus !== 'playing'),
+    [rosterActive],
+  );
+
+  const rosterOnCourt = useMemo(
+    () => rosterActive.filter((p) => p.arrivalStatus === 'playing'),
+    [rosterActive],
+  );
+
   const standingsRowsToday = useMemo(
     () =>
       [...players].sort((a, b) => {
@@ -2717,6 +2727,10 @@ export default function App() {
               <UsersRound />
               <h2>Players</h2>
             </div>
+            <p className="hint player-table-hint">
+              Min / max level and phone are edited only in Manage players. Waiting players are listed
+              first; people on court appear in the section below.
+            </p>
             <div className="player-admin-table-wrap">
               <table className="player-admin-table">
                 <thead>
@@ -2725,16 +2739,13 @@ export default function App() {
                     <th>Name</th>
                     <th>Status</th>
                     <th>Lvl</th>
-                    <th>Min</th>
-                    <th>Max</th>
                     <th>Paddle</th>
-                    <th>Phone</th>
                     <th>Record</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {rosterActive.map((player) => (
+                  {rosterNotOnCourt.map((player) => (
                     <tr key={player.id}>
                       <td className="roster-drag-col">
                         <span
@@ -2798,54 +2809,12 @@ export default function App() {
                         </select>
                       </td>
                       <td>
-                        <select
-                          value={player.minLevel}
-                          onChange={(event) =>
-                            onPlayerFieldChange(player.id, 'minLevel', {
-                              minLevel: Number(event.target.value),
-                            })
-                          }
-                        >
-                          {LEVELS.map((level) => (
-                            <option value={level} key={level}>
-                              {level}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          value={player.maxLevel}
-                          onChange={(event) =>
-                            onPlayerFieldChange(player.id, 'maxLevel', {
-                              maxLevel: Number(event.target.value),
-                            })
-                          }
-                        >
-                          {LEVELS.map((level) => (
-                            <option value={level} key={level}>
-                              {level}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
                         <input
                           list="paddle-options"
                           value={player.paddle}
                           onChange={(event) =>
                             onPlayerFieldChange(player.id, 'paddle', { paddle: event.target.value })
                           }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={player.phone}
-                          onChange={(event) =>
-                            onPlayerFieldChange(player.id, 'phone', { phone: event.target.value })
-                          }
-                          placeholder="Optional"
-                          inputMode="tel"
                         />
                       </td>
                       <td className="record-cell">
@@ -2862,9 +2831,54 @@ export default function App() {
                       </td>
                     </tr>
                   ))}
+                  {rosterOnCourt.length > 0 && (
+                    <tr className="roster-subhead">
+                      <td colSpan={7}>On court (playing) — use courts above for match</td>
+                    </tr>
+                  )}
+                  {rosterOnCourt.map((player) => (
+                    <tr key={player.id} className="roster-on-court">
+                      <td className="roster-drag-col">
+                        <span className="roster-drag-muted" aria-hidden="true">
+                          —
+                        </span>
+                      </td>
+                      <td>
+                        <input value={player.name} readOnly title="On court — edit in Manage players" />
+                      </td>
+                      <td>
+                        <select value="playing" disabled title="On an active court">
+                          <option value="playing">Playing</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select value={player.level} disabled>
+                          {LEVELS.map((level) => (
+                            <option value={level} key={level}>
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input value={player.paddle} readOnly title="Edit in Manage players" />
+                      </td>
+                      <td className="record-cell">{sessionDayRecordLabel(player)}</td>
+                      <td>
+                        <button
+                          className="ghost-button danger compact-button"
+                          disabled
+                          type="button"
+                          title="Use the court card to finish the match first"
+                        >
+                          Mark left
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                   {rosterInactive.length > 0 && (
                     <tr className="roster-subhead">
-                      <td colSpan={11}>Left or unavailable (still listed for today)</td>
+                      <td colSpan={7}>Left or unavailable (still listed for today)</td>
                     </tr>
                   )}
                   {rosterInactive.map((player) => (
@@ -2918,54 +2932,12 @@ export default function App() {
                         </select>
                       </td>
                       <td>
-                        <select
-                          value={player.minLevel}
-                          onChange={(event) =>
-                            onPlayerFieldChange(player.id, 'minLevel', {
-                              minLevel: Number(event.target.value),
-                            })
-                          }
-                        >
-                          {LEVELS.map((level) => (
-                            <option value={level} key={level}>
-                              {level}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          value={player.maxLevel}
-                          onChange={(event) =>
-                            onPlayerFieldChange(player.id, 'maxLevel', {
-                              maxLevel: Number(event.target.value),
-                            })
-                          }
-                        >
-                          {LEVELS.map((level) => (
-                            <option value={level} key={level}>
-                              {level}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
                         <input
                           list="paddle-options"
                           value={player.paddle}
                           onChange={(event) =>
                             onPlayerFieldChange(player.id, 'paddle', { paddle: event.target.value })
                           }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={player.phone}
-                          onChange={(event) =>
-                            onPlayerFieldChange(player.id, 'phone', { phone: event.target.value })
-                          }
-                          placeholder="Optional"
-                          inputMode="tel"
                         />
                       </td>
                       <td className="record-cell">
