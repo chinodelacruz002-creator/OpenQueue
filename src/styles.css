@@ -1045,52 +1045,62 @@ select {
 
 /* Timer urgency — full card background (public “Now playing”) */
 .public-card.court-public-card.public-court-card-timer-warn {
-  background: linear-gradient(145deg, #ffedd5 0%, #fff7ed 55%, #ffffff 100%);
-  border-color: #fb923c;
-  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.35);
+  background: linear-gradient(
+    145deg,
+    hsl(var(--accent) / 0.14) 0%,
+    hsl(var(--card)) 55%,
+    hsl(var(--card)) 100%
+  );
+  border-color: hsl(var(--accent) / 0.45);
+  box-shadow: 0 0 0 1px hsl(var(--accent) / 0.2);
 }
 
 .public-card.court-public-card.public-court-card-timer-over {
-  background: linear-gradient(145deg, #fee2e2 0%, #fef2f2 55%, #ffffff 100%);
-  border-color: #f87171;
-  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.4);
+  background: linear-gradient(
+    145deg,
+    hsl(var(--destructive) / 0.1) 0%,
+    hsl(var(--card)) 55%,
+    hsl(var(--card)) 100%
+  );
+  border-color: hsl(var(--destructive) / 0.35);
+  box-shadow: 0 0 0 1px hsl(var(--destructive) / 0.2);
 }
 
 /* Timer urgency — play surface (admin court) */
 .court-surface.court-surface-timer-warn {
-  background: linear-gradient(160deg, #ffedd5 0%, #fffbef 50%, #fff7ed 100%);
-  border-color: rgba(234, 88, 12, 0.45);
-  box-shadow: inset 0 0 0 1px rgba(251, 146, 60, 0.25);
+  background: linear-gradient(160deg, hsl(var(--accent) / 0.15) 0%, hsl(var(--card)) 100%);
+  border-color: hsl(var(--accent) / 0.45);
+  box-shadow: inset 0 0 0 1px hsl(var(--accent) / 0.2);
 }
 
 .court-surface.court-surface-timer-warn::before {
-  border-color: rgba(234, 88, 12, 0.28);
+  border-color: hsl(var(--accent) / 0.28);
 }
 
 .court-surface.court-surface-timer-warn::after {
-  border-top-color: rgba(234, 88, 12, 0.22);
+  border-top-color: hsl(var(--accent) / 0.22);
 }
 
 .court-surface.court-surface-timer-warn .kitchen-line {
-  border-top-color: rgba(234, 88, 12, 0.22);
+  border-top-color: hsl(var(--accent) / 0.3);
 }
 
 .court-surface.court-surface-timer-over {
-  background: linear-gradient(160deg, #fee2e2 0%, #fff5f5 50%, #fef2f2 100%);
-  border-color: rgba(220, 38, 38, 0.5);
-  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.3);
+  background: linear-gradient(160deg, hsl(var(--destructive) / 0.12) 0%, hsl(var(--card)) 100%);
+  border-color: hsl(var(--destructive) / 0.4);
+  box-shadow: inset 0 0 0 1px hsl(var(--destructive) / 0.2);
 }
 
 .court-surface.court-surface-timer-over::before {
-  border-color: rgba(220, 38, 38, 0.32);
+  border-color: hsl(var(--destructive) / 0.32);
 }
 
 .court-surface.court-surface-timer-over::after {
-  border-top-color: rgba(220, 38, 38, 0.28);
+  border-top-color: hsl(var(--destructive) / 0.28);
 }
 
 .court-surface.court-surface-timer-over .kitchen-line {
-  border-top-color: rgba(220, 38, 38, 0.26);
+  border-top-color: hsl(var(--destructive) / 0.3);
 }
 
 .lock-note {
@@ -1104,7 +1114,7 @@ select {
   display: grid;
   place-items: center;
   padding: 1rem;
-  background: rgba(9, 24, 39, 0.58);
+  background: hsl(var(--foreground) / 0.45);
 }
 
 .bulk-modal,
@@ -1115,9 +1125,11 @@ select {
   max-height: min(54rem, 94vh);
   padding: 0.85rem;
   overflow: hidden;
-  background: #ffffff;
-  border-radius: 1.25rem;
-  box-shadow: 0 2rem 5rem rgba(3, 18, 32, 0.32);
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) * 1.4);
+  box-shadow: 0 1.5rem 3rem hsl(var(--foreground) / 0.12);
 }
 
 .bulk-modal {
@@ -1142,8 +1154,8 @@ select {
   z-index: 5;
   padding: 0.75rem 0.75rem 0.85rem;
   margin: -0.85rem -0.85rem 0;
-  background: rgba(255, 255, 255, 0.92);
-  border-bottom: 1px solid #e6eef5;
+  background: hsl(var(--card) / 0.95);
+  border-bottom: 1px solid hsl(var(--border));
   backdrop-filter: blur(10px);
 }
 
@@ -1162,17 +1174,7 @@ select {
 
 .modal-header p {
   margin-top: 0.35rem;
-  color: #66788a;
-}
-
-.settings-modal {
-  display: grid;
-  gap: 1rem;
-  width: min(42rem, 100%);
-  padding: 1rem;
-  background: #ffffff;
-  border-radius: 1.25rem;
-  box-shadow: 0 2rem 5rem rgba(3, 18, 32, 0.32);
+  color: hsl(var(--muted-foreground));
 }
 
 .settings-grid {
@@ -1189,8 +1191,8 @@ select {
 
 .bulk-table-wrap {
   overflow: auto;
-  border: 1px solid #d9e6ef;
-  border-radius: 1rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) * 1.4);
   max-height: min(60vh, 32rem);
 }
 
@@ -1204,17 +1206,17 @@ select {
 .bulk-table td {
   padding: 0.28rem;
   text-align: left;
-  border-bottom: 1px solid #e6eef5;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .bulk-table th {
   position: sticky;
   top: 0;
   z-index: 1;
-  color: #52697e;
+  color: hsl(var(--muted-foreground));
   font-size: 0.66rem;
   text-transform: uppercase;
-  background: #f8fbfd;
+  background: hsl(var(--muted));
 }
 
 .bulk-table input,
@@ -1246,7 +1248,7 @@ select {
 
 .bulk-row-number {
   width: 2rem;
-  color: #66788a;
+  color: hsl(var(--muted-foreground));
   font-size: 0.75rem;
   font-weight: 900;
 }
@@ -1257,9 +1259,9 @@ select {
   justify-content: center;
   min-height: 2rem;
   padding: 0.35rem 0.55rem;
-  color: #065f46;
-  background: #dcfce7;
-  border: 1px solid #34d399;
+  color: hsl(var(--chart-2) / 1.1);
+  background: hsl(var(--chart-2) / 0.15);
+  border: 1px solid hsl(var(--chart-2) / 0.5);
   border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 900;
@@ -1273,8 +1275,8 @@ select {
 
 .player-admin-table-wrap {
   overflow: auto;
-  border: 1px solid #d9e6ef;
-  border-radius: 1rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) * 1.4);
 }
 
 .player-admin-table {
@@ -1289,12 +1291,12 @@ select {
 }
 
 .player-admin-table .roster-on-court td {
-  background: #f8fafc;
+  background: hsl(var(--muted) / 0.5);
 }
 
 .player-admin-table .roster-drag-muted {
   display: inline-block;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
   font-size: 0.85rem;
 }
 
@@ -1310,15 +1312,15 @@ select {
   align-items: center;
   justify-content: center;
   padding: 0.2rem;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
   cursor: grab;
   user-select: none;
-  border-radius: 0.4rem;
+  border-radius: var(--radius);
 }
 
 .player-admin-table .roster-drag-handle:hover {
-  color: #0f766e;
-  background: #ecfdf5;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.1);
 }
 
 .player-admin-table .roster-drag-handle:active {
@@ -1329,14 +1331,14 @@ select {
 .player-admin-table td {
   padding: 0.45rem;
   text-align: left;
-  border-bottom: 1px solid #e6eef5;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .player-admin-table th {
-  color: #52697e;
+  color: hsl(var(--muted-foreground));
   font-size: 0.72rem;
   text-transform: uppercase;
-  background: #f8fbfd;
+  background: hsl(var(--muted));
 }
 
 .player-admin-table input,
@@ -1352,7 +1354,7 @@ select {
 .storage-status {
   justify-content: flex-start;
   margin-top: 1rem;
-  color: #4f6578;
+  color: hsl(var(--muted-foreground));
   font-size: 0.84rem;
   font-weight: 800;
 }
@@ -1360,9 +1362,9 @@ select {
 .match-player-card {
   padding: 0.7rem;
   text-align: left;
-  background: #ffffff;
-  border: 1px solid #d9e6ef;
-  border-radius: 0.8rem;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
 }
 
 .match-player-card {
@@ -1372,9 +1374,9 @@ select {
 }
 
 .match-player-card.winner {
-  color: #065f46;
-  background: #dcfce7;
-  border-color: #34d399;
+  color: hsl(142 76% 20%);
+  background: hsl(142 76% 95%);
+  border-color: hsl(var(--chart-2) / 0.7);
 }
 
 .match-player-card:disabled {
@@ -1395,8 +1397,8 @@ select {
 
 .substitute-button {
   padding: 0.4rem 0.55rem;
-  color: #9a3412;
-  background: #ffedd5;
+  color: hsl(var(--accent-foreground));
+  background: hsl(var(--accent) / 0.15);
   border: 0;
   border-radius: 999px;
   font-size: 0.78rem;
@@ -1409,16 +1411,17 @@ select {
   place-items: center;
   min-height: 8rem;
   padding: 1rem;
-  color: #6b7d90;
+  color: hsl(var(--muted-foreground));
   text-align: center;
-  background: #f7fafc;
-  border: 1px dashed #c8d8e3;
-  border-radius: 1rem;
+  background: hsl(var(--muted) / 0.4);
+  border: 1px dashed hsl(var(--border));
+  border-radius: calc(var(--radius) * 1.4);
 }
 
 .roster-card {
   padding: 0.75rem;
-  background: #ffffff;
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
 }
 
 .roster-card strong,
@@ -1433,13 +1436,13 @@ select {
 }
 
 .status.present {
-  color: #07613f;
-  background: #dcfce7;
+  color: hsl(142 76% 22%);
+  background: hsl(142 76% 93%);
 }
 
 .status.away {
-  color: #92400e;
-  background: #fef3c7;
+  color: hsl(32 95% 30%);
+  background: hsl(48 96% 92%);
 }
 
 @media (max-width: 1180px) {
