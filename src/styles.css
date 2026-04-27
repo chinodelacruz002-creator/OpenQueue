@@ -1140,3 +1140,86 @@ select {
     border-left-width: 0.35rem;
   }
 }
+
+.app-footer {
+  margin-top: 2rem;
+  padding: 1rem 1.25rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: #64748b;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.register-shell .register-panel,
+.admin-passcode-shell .passcode-panel {
+  max-width: 26rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.register-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.register-field input,
+.register-field select {
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.5rem;
+  border: 1px solid #cbd5e1;
+}
+
+.register-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  grid-column: 1 / -1;
+}
+
+.settings-danger-zone {
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  border: 1px dashed #f87171;
+  background: rgba(254, 226, 226, 0.35);
+}
+
+.settings-danger-zone p {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+}
+
+.record-cell {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  min-width: 10rem;
+}
+
+.record-cell .record-line {
+  margin-bottom: 0.25rem;
+}
+
+.record-cell small {
+  display: inline-block;
+  min-width: 3.25rem;
+  color: #64748b;
+}
+
+.standings-subtoggle {
+  margin-bottom: 0.75rem;
+}
+
+.you-panel {
+  border-left: 4px solid #22c55e;
+}

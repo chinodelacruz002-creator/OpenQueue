@@ -17,7 +17,15 @@ import {
   logUserInteraction,
   type OpenQueueLogStatus,
 } from './actionLog';
-import { GRIP_COLOR_OPTIONS, LEVELS, PADDLE_OPTIONS, getLevelRange } from './constants';
+import {
+  ADMIN_UNLOCK_KEY,
+  DEVICE_REGISTRATION_KEY,
+  GRIP_COLOR_OPTIONS,
+  LEVELS,
+  PADDLE_OPTIONS,
+  getLevelRange,
+  normalizePhoneDigits,
+} from './constants';
 import {
   buildAutoAssignments,
   createGroupsFromAvailablePlayers,
@@ -26,6 +34,7 @@ import {
   getElapsedSeconds,
 } from './scheduler';
 import {
+  appendSelfRegisteredPlayer,
   hasSupabaseConfig,
   loadOpenPlayData,
   saveOpenPlayData,
@@ -58,6 +67,22 @@ const isLockedPublicView = (() => {
   const param = getInitialViewParam();
   return param === 'player' || param === 'standings';
 })();
+const isRegisterView = getInitialViewParam() === 'register';
+
+const getAdminPasscode = (): string => {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yyyy = String(d.getFullYear());
+  return `${mm}${dd}${yyyy}`;
+};
+
+const resetCourtsKeepingLayout = (courtList: Court[]): Court[] =>
+  courtList.map((court) => ({
+    ...court,
+    status: 'ready',
+    match: null,
+  }));
 
 interface BulkPlayerRow extends PlayerForm {
   rowId: string;
@@ -80,6 +105,7 @@ const createBulkRow = (): BulkPlayerRow => ({
   paddle: '',
   gripColor: '',
   preferredPartnerName: '',
+  phone: '',
   savedPlayerId: '',
   playerId: null,
   arrivalStatus: 'present',
@@ -107,6 +133,7 @@ const buildBulkRowsFromPlayers = (players: Player[]): BulkPlayerRow[] => {
       paddle: player.paddle,
       gripColor: player.gripColor,
       preferredPartnerName: player.preferredPartnerName,
+      phone: player.phone ?? '',
       arrivalStatus: player.arrivalStatus,
       savedPlayerId: player.persistentId ?? '',
     };
@@ -133,25 +160,60 @@ const createAppData = (): AppData => ({
   savedPlayers: [],
   savedPaddles: PADDLE_OPTIONS,
   savedGripColors: GRIP_COLOR_OPTIONS,
+  showPublicRanking: true,
 });
 
-const buildSavedPlayer = (player: Player): SavedPlayer => ({
-  id: player.persistentId ?? player.id,
-  name: player.name,
-  level: player.level,
-  minLevel: player.minLevel,
-  maxLevel: player.maxLevel,
-  paddle: player.paddle,
-  gripColor: player.gripColor,
-  preferredPartnerName: player.preferredPartnerName,
-  wins: player.wins,
-  losses: player.losses,
-  gamesPlayed: player.gamesPlayed,
-  rankingScore: player.rankingScore,
-});
+const mergeSavedAfterMatch = (
+  prev: SavedPlayer | undefined,
+  sessionPlayer: Player,
+  isWinner: boolean,
+): SavedPlayer => {
+  const id = prev?.id ?? sessionPlayer.persistentId ?? crypto.randomUUID();
+  const base =
+    prev ?? {
+      id,
+      name: sessionPlayer.name,
+      level: sessionPlayer.level,
+      minLevel: sessionPlayer.minLevel,
+      maxLevel: sessionPlayer.maxLevel,
+      paddle: sessionPlayer.paddle,
+      gripColor: sessionPlayer.gripColor,
+      preferredPartnerName: sessionPlayer.preferredPartnerName,
+      phone: sessionPlayer.phone ?? '',
+      wins: 0,
+      losses: 0,
+      gamesPlayed: 0,
+      rankingScore: 0,
+    };
 
-const scoreLabel = (player: Player) =>
-  `${player.wins}W-${player.losses}L / Rank ${player.rankingScore}`;
+  return {
+    ...base,
+    id,
+    name: sessionPlayer.name,
+    level: sessionPlayer.level,
+    minLevel: sessionPlayer.minLevel,
+    maxLevel: sessionPlayer.maxLevel,
+    paddle: sessionPlayer.paddle,
+    gripColor: sessionPlayer.gripColor,
+    preferredPartnerName: sessionPlayer.preferredPartnerName,
+    phone: (sessionPlayer.phone ?? '').trim() || base.phone,
+    wins: base.wins + (isWinner ? 1 : 0),
+    losses: base.losses + (isWinner ? 0 : 1),
+    gamesPlayed: base.gamesPlayed + 1,
+    rankingScore: base.rankingScore + (isWinner ? 3 : 0),
+  };
+};
+
+const sessionScoreLabel = (player: Player) =>
+  `${player.wins}W-${player.losses}L · Today rank ${player.rankingScore}`;
+
+const overallRecordLabel = (player: Player, savedPlayers: SavedPlayer[]): string => {
+  const saved = savedPlayers.find((s) => s.id === player.persistentId);
+  if (!saved) {
+    return '—';
+  }
+  return `${saved.wins}W-${saved.losses}L · Overall rank ${saved.rankingScore}`;
+};
 
 const groupClassName = (canUseSelectedCourt: boolean) =>
   canUseSelectedCourt ? 'queue-card compatible' : 'queue-card';
@@ -166,9 +228,19 @@ const upsertSavedPlayer = (
   incomingPlayer: SavedPlayer,
 ): SavedPlayer[] => {
   const incomingName = incomingPlayer.name.toLowerCase();
-  const existingIndex = savedPlayers.findIndex(
-    (player) => player.id === incomingPlayer.id || player.name.toLowerCase() === incomingName,
-  );
+  const incomingPhone = normalizePhoneDigits(incomingPlayer.phone);
+  const existingIndex = savedPlayers.findIndex((player) => {
+    if (player.id === incomingPlayer.id) {
+      return true;
+    }
+    if (player.name.toLowerCase() === incomingName) {
+      return true;
+    }
+    if (incomingPhone && normalizePhoneDigits(player.phone) === incomingPhone) {
+      return true;
+    }
+    return false;
+  });
 
   if (existingIndex < 0) {
     return [...savedPlayers, incomingPlayer].sort((first, second) =>
@@ -177,7 +249,7 @@ const upsertSavedPlayer = (
   }
 
   return savedPlayers.map((player, index) =>
-    index === existingIndex ? { ...player, ...incomingPlayer } : player,
+    index === existingIndex ? { ...player, ...incomingPlayer, id: player.id } : player,
   );
 };
 
@@ -201,6 +273,7 @@ export default function App() {
   const pagePath = window.location.pathname;
   const playerQueueUrl = `${pagePath}?view=player`;
   const standingsUrl = `${pagePath}?view=standings`;
+  const registerUrl = `${pagePath}?view=register`;
   const initialViewParam = getInitialViewParam();
   const [players, setPlayers] = useState<Player[]>([]);
   const [savedPlayers, setSavedPlayers] = useState<SavedPlayer[]>([]);
@@ -224,6 +297,18 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const [now, setNow] = useState(0);
+  const [showPublicRanking, setShowPublicRanking] = useState(true);
+  const [adminUnlocked, setAdminUnlocked] = useState(
+    () => sessionStorage.getItem(ADMIN_UNLOCK_KEY) === '1',
+  );
+  const [passcodeInput, setPasscodeInput] = useState('');
+  const [passcodeError, setPasscodeError] = useState('');
+  const [publicStandingsScope, setPublicStandingsScope] = useState<'today' | 'overall'>('today');
+  const [registerName, setRegisterName] = useState('');
+  const [registerPhone, setRegisterPhone] = useState('');
+  const [registerLevel, setRegisterLevel] = useState(3);
+  const [registerError, setRegisterError] = useState('');
+  const [registerDone, setRegisterDone] = useState('');
 
   const logUserAction = useCallback(
     (
@@ -255,8 +340,18 @@ export default function App() {
       savedPlayers,
       savedPaddles: paddleOptions,
       savedGripColors: gripColorOptions,
+      showPublicRanking,
     }),
-    [courts, gripColorOptions, maxMinutes, paddleOptions, players, savedPlayers, sessionDate],
+    [
+      courts,
+      gripColorOptions,
+      maxMinutes,
+      paddleOptions,
+      players,
+      savedPlayers,
+      sessionDate,
+      showPublicRanking,
+    ],
   );
 
   const flushSave = useCallback(
@@ -336,6 +431,93 @@ export default function App() {
     window.history.replaceState(null, '', `${pagePath}?view=${view}`);
   };
 
+  const fullResetToday = async () => {
+    if (
+      !window.confirm(
+        'Remove every player from today’s session and reset all courts? Lifetime saved profiles are kept.',
+      )
+    ) {
+      return;
+    }
+    if (isSaving) {
+      return;
+    }
+    logUserAction('full_reset_today', 'admin.full_reset', 'applied');
+    setPlayers([]);
+    setCourts((c) => resetCourtsKeepingLayout(c));
+    setBulkRows(createBulkRows());
+    await flushSave('full_reset_today');
+  };
+
+  const tryAdminUnlock = () => {
+    if (passcodeInput.replace(/\D/g, '') === getAdminPasscode()) {
+      sessionStorage.setItem(ADMIN_UNLOCK_KEY, '1');
+      setAdminUnlocked(true);
+      setPasscodeError('');
+      setPasscodeInput('');
+    } else {
+      setPasscodeError('Incorrect passcode.');
+    }
+  };
+
+  const lockAdmin = () => {
+    sessionStorage.removeItem(ADMIN_UNLOCK_KEY);
+    setAdminUnlocked(false);
+    setPasscodeInput('');
+    setPasscodeError('');
+  };
+
+  const submitSelfRegister = async () => {
+    setRegisterError('');
+    setRegisterDone('');
+    const name = registerName.trim();
+    if (!name) {
+      setRegisterError('Please enter your name.');
+      return;
+    }
+    const range = getLevelRange(registerLevel);
+    const newPlayer: Player = {
+      id: crypto.randomUUID(),
+      persistentId: null,
+      name,
+      level: registerLevel,
+      minLevel: range.minLevel,
+      maxLevel: range.maxLevel,
+      paddle: '',
+      gripColor: '',
+      preferredPartnerName: '',
+      phone: registerPhone.trim(),
+      partnerId: null,
+      arrivalStatus: 'present',
+      wins: 0,
+      losses: 0,
+      gamesPlayed: 0,
+      waitScore: 0,
+      lastResult: null,
+      lockedGroupId: null,
+      rankingScore: 0,
+      joinedQueueAt: Date.now(),
+    };
+
+    const result = await appendSelfRegisteredPlayer(newPlayer);
+    if (!result.ok) {
+      setRegisterError(result.error);
+      return;
+    }
+    const data = await loadOpenPlayData();
+    const sessionKey = data?.sessionDate ?? todayKey();
+    localStorage.setItem(
+      DEVICE_REGISTRATION_KEY,
+      JSON.stringify({ playerId: result.playerId, sessionDate: sessionKey }),
+    );
+    setRegisterDone(
+      `You are on the list for ${sessionKey}. Open the queue link on this device to track your spot.`,
+    );
+    setRegisterName('');
+    setRegisterPhone('');
+    setRegisterLevel(3);
+  };
+
   const applyLoad = useCallback((data: AppData | null, kind: 'initial' | 'sync') => {
     const appData = data ?? createAppData();
     setSessionDate(appData.sessionDate || todayKey());
@@ -345,6 +527,7 @@ export default function App() {
     setSavedPlayers(appData.savedPlayers ?? []);
     setPaddleOptions(mergeOptions(PADDLE_OPTIONS, appData.savedPaddles ?? []));
     setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, appData.savedGripColors ?? []));
+    setShowPublicRanking(appData.showPublicRanking !== false);
     if (kind === 'initial') {
       setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
     } else {
@@ -422,7 +605,9 @@ export default function App() {
 
   useEffect(() => {
     let timer = 0;
-    const needsPoll = !hasSupabaseConfig && (isLockedPublicView || viewMode === 'player');
+    const needsPoll =
+      !hasSupabaseConfig &&
+      (isLockedPublicView || isRegisterView || viewMode === 'player');
     if (hasSupabaseConfig) {
       timer = window.setInterval(() => {
         void loadOpenPlayData().then((data) => {
@@ -471,7 +656,7 @@ export default function App() {
   }, [applyLoad, viewMode]);
 
   useEffect(() => {
-    if (isLockedPublicView) {
+    if (isLockedPublicView || isRegisterView) {
       return;
     }
     const saveTimer = window.setTimeout(() => {
@@ -479,7 +664,17 @@ export default function App() {
     }, SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(saveTimer);
-  }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, savedPlayers, sessionDate, flushSave]);
+  }, [
+    courts,
+    gripColorOptions,
+    maxMinutes,
+    paddleOptions,
+    players,
+    savedPlayers,
+    sessionDate,
+    showPublicRanking,
+    flushSave,
+  ]);
 
   const availablePlayers = useMemo(
     () => getAvailablePlayers(players),
@@ -540,7 +735,7 @@ export default function App() {
     return { rosterActive: active, rosterInactive: inactive };
   }, [players]);
 
-  const standingsRows = useMemo(
+  const standingsRowsToday = useMemo(
     () =>
       [...players].sort((a, b) => {
         const byRank = b.rankingScore - a.rankingScore;
@@ -550,6 +745,18 @@ export default function App() {
         return a.name.localeCompare(b.name);
       }),
     [players],
+  );
+
+  const standingsRowsOverall = useMemo(
+    () =>
+      [...savedPlayers].sort((a, b) => {
+        const byRank = b.rankingScore - a.rankingScore;
+        if (byRank !== 0) {
+          return byRank;
+        }
+        return a.name.localeCompare(b.name);
+      }),
+    [savedPlayers],
   );
 
   const bulkRowsPerColumn = Math.ceil(bulkRows.length / 2);
@@ -583,6 +790,7 @@ export default function App() {
       paddle: savedPlayer.paddle,
       gripColor: '',
       preferredPartnerName: '',
+      phone: savedPlayer.phone ?? '',
     });
   };
 
@@ -661,6 +869,7 @@ export default function App() {
           maxLevel: Number(row.maxLevel),
           paddle: row.paddle.trim(),
           preferredPartnerName: row.preferredPartnerName.trim(),
+          phone: row.phone.trim(),
         } satisfies Player;
       }
 
@@ -674,15 +883,17 @@ export default function App() {
         paddle: row.paddle.trim(),
         gripColor: '',
         preferredPartnerName: row.preferredPartnerName.trim(),
+        phone: row.phone.trim(),
         partnerId: null,
         arrivalStatus: 'present',
-        wins: savedPlayer?.wins ?? 0,
-        losses: savedPlayer?.losses ?? 0,
-        gamesPlayed: savedPlayer?.gamesPlayed ?? 0,
+        wins: 0,
+        losses: 0,
+        gamesPlayed: 0,
         waitScore: 0,
         lastResult: null,
         lockedGroupId: null,
-        rankingScore: savedPlayer?.rankingScore ?? 0,
+        rankingScore: 0,
+        joinedQueueAt: Date.now(),
       } satisfies Player;
     });
 
@@ -698,6 +909,25 @@ export default function App() {
         setBulkAddError(`Duplicate name: ${player.name}. Each player name must be unique.`);
         logUserAction('bulk_update_players', 'bulk_modal.update_players', 'failed', {
           detail: { reason: 'duplicate_name', playerName: player.name },
+        });
+        return;
+      }
+    }
+
+    for (const player of editedPlayers) {
+      const digits = normalizePhoneDigits(player.phone);
+      if (!digits) {
+        continue;
+      }
+      const otherPhone = editedPlayers.find(
+        (p) => p.id !== player.id && normalizePhoneDigits(p.phone) === digits,
+      );
+      if (otherPhone) {
+        setBulkAddError(
+          `Duplicate phone on roster: ${player.name} and ${otherPhone.name}.`,
+        );
+        logUserAction('bulk_update_players', 'bulk_modal.update_players', 'failed', {
+          detail: { reason: 'duplicate_phone' },
         });
         return;
       }
@@ -732,9 +962,20 @@ export default function App() {
 
   const updatePlayer = (playerId: string, updates: Partial<Player>) => {
     setPlayers((currentPlayers) =>
-      currentPlayers.map((player) =>
-        player.id === playerId ? { ...player, ...updates } : player,
-      ),
+      currentPlayers.map((player) => {
+        if (player.id !== playerId) {
+          return player;
+        }
+        let next: Player = { ...player, ...updates };
+        if (updates.arrivalStatus !== undefined) {
+          if (updates.arrivalStatus === 'present' && player.arrivalStatus !== 'present') {
+            next = { ...next, joinedQueueAt: Date.now() };
+          } else if (updates.arrivalStatus !== 'present') {
+            next = { ...next, joinedQueueAt: null };
+          }
+        }
+        return next;
+      }),
     );
   };
 
@@ -821,7 +1062,7 @@ export default function App() {
       return;
     }
     logUserAction('mark_player_left', 'roster.mark_left', 'applied', { detail: { playerId } });
-    updatePlayer(playerId, { arrivalStatus: 'left' });
+    updatePlayer(playerId, { arrivalStatus: 'left', joinedQueueAt: null });
     await flushSave('mark_player_left');
   };
 
@@ -878,6 +1119,7 @@ export default function App() {
         return {
           ...player,
           arrivalStatus: 'assigned',
+          joinedQueueAt: null,
         };
       }),
     );
@@ -960,44 +1202,62 @@ export default function App() {
     });
 
     const matchPlayerIds = getPlayerIdsInMatch(court.match);
-    const winnerIds = court.match.winnerIds;
+    const winnerIds = new Set(court.match.winnerIds);
+    const savedMutations: SavedPlayer[] = [];
+    const sessionUpdates = new Map<string, Player>();
+
+    for (const playerId of matchPlayerIds) {
+      const player = players.find((p) => p.id === playerId);
+      if (!player) {
+        continue;
+      }
+      const isWinner = winnerIds.has(playerId);
+      const prevProfile = player.persistentId
+        ? savedPlayers.find((s) => s.id === player.persistentId)
+        : undefined;
+      const mergedSaved = mergeSavedAfterMatch(prevProfile, player, isWinner);
+      savedMutations.push(mergedSaved);
+
+      const updatedPlayer: Player = {
+        ...player,
+        persistentId: player.persistentId ?? mergedSaved.id,
+        arrivalStatus: 'present',
+        wins: player.wins + (isWinner ? 1 : 0),
+        losses: player.losses + (isWinner ? 0 : 1),
+        gamesPlayed: player.gamesPlayed + 1,
+        waitScore: player.waitScore + (isWinner ? 2 : 1),
+        rankingScore: player.rankingScore + (isWinner ? 3 : 0),
+        lastResult: isWinner ? 'won' : 'lost',
+        joinedQueueAt: Date.now(),
+      };
+      sessionUpdates.set(playerId, updatedPlayer);
+    }
+
+    setSavedPlayers((prevSaved) => {
+      let next = prevSaved;
+      for (const merged of savedMutations) {
+        next = upsertSavedPlayer(next, merged);
+      }
+      return next;
+    });
 
     setPlayers((currentPlayers) => {
+      const keptPlayers = currentPlayers.filter((p) => !matchPlayerIds.includes(p.id));
       const returningWinners: Player[] = [];
       const returningLosers: Player[] = [];
-      const keptPlayers: Player[] = [];
 
-      for (const player of currentPlayers) {
-        if (!matchPlayerIds.includes(player.id)) {
-          keptPlayers.push(player);
+      for (const playerId of matchPlayerIds) {
+        const updated = sessionUpdates.get(playerId);
+        if (!updated) {
           continue;
         }
-
-        const isWinner = winnerIds.includes(player.id);
-        const updatedPlayer: Player = {
-          ...player,
-          arrivalStatus: 'present',
-          wins: player.wins + (isWinner ? 1 : 0),
-          losses: player.losses + (isWinner ? 0 : 1),
-          gamesPlayed: player.gamesPlayed + 1,
-          waitScore: player.waitScore + (isWinner ? 2 : 1),
-          rankingScore: player.rankingScore + (isWinner ? 3 : 0),
-          lastResult: isWinner ? 'won' : 'lost',
-        };
-
-        setSavedPlayers((currentSavedPlayers) =>
-          upsertSavedPlayer(currentSavedPlayers, buildSavedPlayer(updatedPlayer)),
-        );
-
-        if (isWinner) {
-          returningWinners.push(updatedPlayer);
+        if (winnerIds.has(playerId)) {
+          returningWinners.push(updated);
         } else {
-          returningLosers.push(updatedPlayer);
+          returningLosers.push(updated);
         }
       }
 
-      // FIFO fairness: returning players go behind anyone already waiting.
-      // Within the returning batch, winners are appended before losers so they stack together.
       return [...keptPlayers, ...returningWinners, ...returningLosers];
     });
 
@@ -1017,7 +1277,7 @@ export default function App() {
       setPlayers((currentPlayers) =>
         currentPlayers.map((player) =>
           playerIds.includes(player.id)
-            ? { ...player, arrivalStatus: 'present' }
+            ? { ...player, arrivalStatus: 'present', joinedQueueAt: Date.now() }
             : player,
         ),
       );
@@ -1048,7 +1308,9 @@ export default function App() {
       });
       setPlayers((currentPlayers) =>
         currentPlayers.map((player) =>
-          player.id === removedPlayerId ? { ...player, arrivalStatus: 'away' } : player,
+          player.id === removedPlayerId
+            ? { ...player, arrivalStatus: 'away', joinedQueueAt: null }
+            : player,
         ),
       );
       updateCourt(courtId, {
@@ -1072,11 +1334,11 @@ export default function App() {
     setPlayers((currentPlayers) =>
       currentPlayers.map((player) => {
         if (player.id === removedPlayerId) {
-          return { ...player, arrivalStatus: 'away' };
+          return { ...player, arrivalStatus: 'away', joinedQueueAt: null };
         }
 
         if (player.id === replacement.id) {
-          return { ...player, arrivalStatus: 'assigned' };
+          return { ...player, arrivalStatus: 'assigned', joinedQueueAt: null };
         }
 
         return player;
@@ -1155,7 +1417,7 @@ export default function App() {
     setPlayers((currentPlayers) =>
       currentPlayers.map((player) =>
         player.id === data.playerId
-          ? { ...player, arrivalStatus: 'present' }
+          ? { ...player, arrivalStatus: 'present', joinedQueueAt: Date.now() }
           : player,
       ),
     );
@@ -1215,6 +1477,7 @@ export default function App() {
                     <th>Min</th>
                     <th>Max</th>
                     <th>Paddle</th>
+                    <th>Phone</th>
                     <th>Status</th>
                     <th />
                   </tr>
@@ -1299,6 +1562,19 @@ export default function App() {
                             )
                           }
                           placeholder="Paddle"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          value={row.phone}
+                          onChange={(event) =>
+                            onBulkFieldChange(row.rowId, 'phone', () =>
+                              updateBulkRow(row.rowId, { phone: event.target.value }),
+                            )
+                          }
+                          placeholder="Optional"
+                          inputMode="tel"
+                          autoComplete="tel"
                         />
                       </td>
                       <td>
@@ -1394,6 +1670,30 @@ export default function App() {
               }}
             />
           </label>
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={showPublicRanking}
+              onChange={(event) => {
+                const next = event.target.checked;
+                logUserAction('settings_public_ranking', 'settings.public_ranking', 'applied', {
+                  detail: { showPublicRanking: next },
+                });
+                setShowPublicRanking(next);
+              }}
+            />
+            Show rankings on public queue / standings links
+          </label>
+        </div>
+
+        <div className="settings-danger-zone">
+          <p>
+            <strong>Full reset today</strong> removes every player from the session and clears
+            court matches. Saved lifetime profiles are not deleted.
+          </p>
+          <button className="ghost-button danger" type="button" onClick={() => void fullResetToday()}>
+            Full reset today
+          </button>
         </div>
 
         <div className="storage-status">
@@ -1404,132 +1704,316 @@ export default function App() {
     </div>
   );
 
-  const renderPlayerView = () => (
-    <section className="player-view">
-      {!isLockedPublicView && (
-        <p className="public-view-link-row">
-          <a className="ghost-button" href={standingsUrl}>
-            View full standings
-          </a>
-        </p>
-      )}
-      <section className="panel player-queue-panel">
-        <div className="panel-title">
-          <UsersRound />
-          <h2>Up next</h2>
-        </div>
-        <div className="public-list">
-          {nextGroups.length > 0 ? (
-            <article className="public-card">
-              <strong>Next groups (2)</strong>
-              <span>
-                {nextGroups.map((group, index) => (
-                  <span key={group.id}>
-                    #{index + 1}:{' '}
-                    {group.players.map((player) => player.name).join(', ')}
-                    {index === nextGroups.length - 1 ? '' : ' · '}
-                  </span>
-                ))}
-              </span>
-              <small>Neutral players first, then winners, then losers.</small>
-            </article>
-          ) : null}
+  const renderPlayerView = () => {
+    const rankingOnPublic = !isLockedPublicView || showPublicRanking;
+    let deviceReg: { playerId: string; sessionDate: string } | null = null;
+    try {
+      const raw = localStorage.getItem(DEVICE_REGISTRATION_KEY);
+      if (raw) {
+        deviceReg = JSON.parse(raw) as { playerId: string; sessionDate: string };
+      }
+    } catch {
+      deviceReg = null;
+    }
+    const myPlayer =
+      deviceReg && deviceReg.sessionDate === sessionDate
+        ? players.find((p) => p.id === deviceReg!.playerId)
+        : undefined;
+    const fifoIndex =
+      myPlayer && myPlayer.arrivalStatus === 'present'
+        ? fifoQueueOrder.findIndex((p) => p.id === myPlayer.id)
+        : -1;
+    const todayRankIndex =
+      myPlayer && rankingOnPublic
+        ? standingsRowsToday.findIndex((p) => p.id === myPlayer.id)
+        : -1;
+    const waitSeconds =
+      myPlayer?.joinedQueueAt && myPlayer.arrivalStatus === 'present'
+        ? Math.max(0, Math.floor((now - myPlayer.joinedQueueAt) / 1000))
+        : 0;
 
-          {upNextPlayers.map((player, index) => (
-            <article className="public-card" key={player.id}>
-              <strong>
-                #{index + 1} {player.name}
-              </strong>
-              <span>In line (FIFO)</span>
-              <small>{scoreLabel(player)}</small>
-            </article>
-          ))}
+    return (
+      <section className="player-view">
+        {!isLockedPublicView && (
+          <p className="public-view-link-row">
+            <a className="ghost-button" href={standingsUrl}>
+              View full standings
+            </a>
+          </p>
+        )}
+        {isLockedPublicView && (
+          <p className="public-view-link-row">
+            <a className="ghost-button" href={registerUrl}>
+              Register for today&apos;s game
+            </a>
+          </p>
+        )}
 
-          {!waitingPlayers.length && (
-            <p className="hint">No waiting players are currently in the queue.</p>
-          )}
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-title">
-          <Clock3 />
-          <h2>Now playing / loaded</h2>
-        </div>
-        <div className="public-list">
-          {courts.map((court) => {
-            const elapsedSeconds = getElapsedSeconds(court.match, now);
-            const topNames = court.match?.players.slice(0, 2).map((player) => player.name).join(', ');
-            const bottomNames = court.match?.players.slice(2, 4).map((player) => player.name).join(', ');
-            const emptyCourtLabel =
-              court.status === 'reserved' || court.status === 'unavailable'
-                ? court.status
-                : 'Available for next group';
-
-            return (
-              <article className={`public-card court-public-card ${court.status}`} key={court.id}>
-                <strong>{court.name}</strong>
-                {court.match ? (
-                  <div className="public-court-teams">
-                    <span>
-                      Top: {topNames || '—'}
-                    </span>
-                    <span>
-                      Bottom: {bottomNames || '—'}
-                    </span>
-                  </div>
-                ) : (
-                  <span>{emptyCourtLabel}</span>
-                )}
-                <small>
-                  {court.status}
-                  {court.match?.startedAt ? ` · ${formatElapsedTime(elapsedSeconds)}` : ''}
-                </small>
+        {myPlayer ? (
+          <section className="panel you-panel">
+            <div className="panel-title">
+              <CheckCircle2 />
+              <h2>You ({myPlayer.name})</h2>
+            </div>
+            <div className="public-list">
+              <article className="public-card">
+                <strong>Status</strong>
+                <span>{myPlayer.arrivalStatus}</span>
+                {myPlayer.arrivalStatus === 'present' && fifoIndex >= 0 ? (
+                  <small>
+                    Queue position (FIFO): #{fifoIndex + 1} of {fifoQueueOrder.length}
+                  </small>
+                ) : null}
+                {myPlayer.arrivalStatus === 'present' && myPlayer.joinedQueueAt ? (
+                  <small>Waiting about {formatElapsedTime(waitSeconds)}</small>
+                ) : null}
+                {rankingOnPublic && todayRankIndex >= 0 ? (
+                  <small>
+                    Today&apos;s ranking: #{todayRankIndex + 1} · {sessionScoreLabel(myPlayer)}
+                  </small>
+                ) : null}
+                {rankingOnPublic ? (
+                  <small>Overall: {overallRecordLabel(myPlayer, savedPlayers)}</small>
+                ) : null}
               </article>
-            );
-          })}
-        </div>
-      </section>
-    </section>
-  );
+            </div>
+          </section>
+        ) : deviceReg && deviceReg.sessionDate !== sessionDate ? (
+          <p className="hint">
+            This device was registered for {deviceReg.sessionDate}. Register again for {sessionDate}{' '}
+            or open the queue link after check-in.
+          </p>
+        ) : null}
 
-  const renderStandingsView = () => (
-    <section className="player-view standings-view">
-      <section className="panel">
-        <div className="panel-title">
-          <Trophy />
-          <h2>Standings (today&apos;s session)</h2>
-        </div>
-        <div className="standings-table-wrap">
-          <table className="standings-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Name</th>
-                <th>Record</th>
-                <th>Rank score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {standingsRows.map((player, index) => (
-                <tr key={player.id}>
-                  <td>{index + 1}</td>
-                  <td>{player.name}</td>
-                  <td>
-                    {player.wins}W — {player.losses}L
-                  </td>
-                  <td>{player.rankingScore}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!standingsRows.length && (
-            <p className="hint">No players in today&apos;s session yet.</p>
-          )}
-        </div>
+        <section className="panel player-queue-panel">
+          <div className="panel-title">
+            <UsersRound />
+            <h2>Up next</h2>
+          </div>
+          <div className="public-list">
+            {nextGroups.length > 0 ? (
+              <article className="public-card">
+                <strong>Next groups (2)</strong>
+                <span>
+                  {nextGroups.map((group, index) => (
+                    <span key={group.id}>
+                      #{index + 1}:{' '}
+                      {group.players.map((player) => player.name).join(', ')}
+                      {index === nextGroups.length - 1 ? '' : ' · '}
+                    </span>
+                  ))}
+                </span>
+                <small>Neutral players first, then winners, then losers.</small>
+              </article>
+            ) : null}
+
+            {upNextPlayers.map((player, index) => (
+              <article className="public-card" key={player.id}>
+                <strong>
+                  #{index + 1} {player.name}
+                </strong>
+                <span>In line (FIFO)</span>
+                {rankingOnPublic ? <small>{sessionScoreLabel(player)}</small> : null}
+              </article>
+            ))}
+
+            {!waitingPlayers.length && (
+              <p className="hint">No waiting players are currently in the queue.</p>
+            )}
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <Clock3 />
+            <h2>Now playing / loaded</h2>
+          </div>
+          <div className="public-list">
+            {courts.map((court) => {
+              const elapsedSeconds = getElapsedSeconds(court.match, now);
+              const topNames = court.match?.players.slice(0, 2).map((player) => player.name).join(', ');
+              const bottomNames = court.match?.players.slice(2, 4).map((player) => player.name).join(', ');
+              const emptyCourtLabel =
+                court.status === 'reserved' || court.status === 'unavailable'
+                  ? court.status
+                  : 'Available for next group';
+
+              return (
+                <article className={`public-card court-public-card ${court.status}`} key={court.id}>
+                  <strong>{court.name}</strong>
+                  {court.match ? (
+                    <div className="public-court-teams">
+                      <span>
+                        Top: {topNames || '—'}
+                      </span>
+                      <span>
+                        Bottom: {bottomNames || '—'}
+                      </span>
+                    </div>
+                  ) : (
+                    <span>{emptyCourtLabel}</span>
+                  )}
+                  <small>
+                    {court.status}
+                    {court.match?.startedAt ? ` · ${formatElapsedTime(elapsedSeconds)}` : ''}
+                  </small>
+                </article>
+              );
+            })}
+          </div>
+        </section>
       </section>
-    </section>
-  );
+    );
+  };
+
+  const renderStandingsView = () => {
+    const isToday = publicStandingsScope === 'today';
+    const rowsToday = standingsRowsToday;
+    const rowsOverall = standingsRowsOverall;
+
+    return (
+      <section className="player-view standings-view">
+        {isLockedPublicView && showPublicRanking ? (
+          <div className="public-nav view-toggle standings-subtoggle">
+            <button
+              className={publicStandingsScope === 'today' ? 'primary-button' : 'ghost-button'}
+              onClick={() => setPublicStandingsScope('today')}
+              type="button"
+            >
+              Today
+            </button>
+            <button
+              className={publicStandingsScope === 'overall' ? 'primary-button' : 'ghost-button'}
+              onClick={() => setPublicStandingsScope('overall')}
+              type="button"
+            >
+              Overall
+            </button>
+          </div>
+        ) : null}
+        <section className="panel">
+          <div className="panel-title">
+            <Trophy />
+            <h2>
+              {isToday ? 'Standings — today’s session' : 'Standings — overall (saved profiles)'}
+            </h2>
+          </div>
+          <div className="standings-table-wrap">
+            <table className="standings-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Name</th>
+                  <th>W</th>
+                  <th>L</th>
+                  <th>Rank score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isToday
+                  ? rowsToday.map((player, index) => (
+                      <tr key={player.id}>
+                        <td>{index + 1}</td>
+                        <td>{player.name}</td>
+                        <td>{player.wins}</td>
+                        <td>{player.losses}</td>
+                        <td>{player.rankingScore}</td>
+                      </tr>
+                    ))
+                  : rowsOverall.map((player, index) => (
+                      <tr key={player.id}>
+                        <td>{index + 1}</td>
+                        <td>{player.name}</td>
+                        <td>{player.wins}</td>
+                        <td>{player.losses}</td>
+                        <td>{player.rankingScore}</td>
+                      </tr>
+                    ))}
+              </tbody>
+            </table>
+            {isToday && !rowsToday.length && (
+              <p className="hint">No players in today&apos;s session yet.</p>
+            )}
+            {!isToday && !rowsOverall.length && (
+              <p className="hint">No saved profiles yet.</p>
+            )}
+          </div>
+        </section>
+      </section>
+    );
+  };
+
+  if (isRegisterView) {
+    return (
+      <main className="app-shell register-shell">
+        <section className="hero hero-slim">
+          <div>
+            <span className="eyebrow">Self check-in</span>
+            <h1>Register for today&apos;s game</h1>
+            <p>
+              Add yourself to the queue for {sessionDate}. Optional phone links you to an existing
+              profile and helps avoid duplicates.
+            </p>
+          </div>
+        </section>
+        <section className="panel register-panel">
+          <label className="register-field">
+            Name
+            <input
+              value={registerName}
+              onChange={(event) => setRegisterName(event.target.value)}
+              placeholder="Your name"
+              autoComplete="name"
+            />
+          </label>
+          <label className="register-field">
+            Level
+            <select
+              value={registerLevel}
+              onChange={(event) => setRegisterLevel(Number(event.target.value))}
+            >
+              {LEVELS.map((level) => (
+                <option value={level} key={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="register-field">
+            Phone (optional)
+            <input
+              value={registerPhone}
+              onChange={(event) => setRegisterPhone(event.target.value)}
+              placeholder="For your device + duplicate check"
+              inputMode="tel"
+              autoComplete="tel"
+            />
+          </label>
+          {registerError ? (
+            <p className="bulk-error" role="alert">
+              {registerError}
+            </p>
+          ) : null}
+          {registerDone ? (
+            <p className="hint" role="status">
+              {registerDone}
+            </p>
+          ) : null}
+          <div className="register-actions">
+            <button className="primary-button" type="button" onClick={() => void submitSelfRegister()}>
+              Join today&apos;s queue
+            </button>
+            <a className="ghost-button" href={playerQueueUrl}>
+              Open queue view
+            </a>
+          </div>
+        </section>
+        <footer className="app-footer">
+          Built for CamSur PickleBall Club Open Club by Dev.Onich
+        </footer>
+      </main>
+    );
+  }
 
   if (isLockedPublicView) {
     return (
@@ -1539,8 +2023,9 @@ export default function App() {
             <span className="eyebrow">Open play</span>
             <h1>OpenQueue</h1>
             <p>
-              {sessionDate}. Live queue and standings. Ask staff for the admin link; this
-              page is read-only.
+              {sessionDate}. Live queue
+              {showPublicRanking ? ' and standings' : ''}. Ask staff for the admin link; this page is
+              read-only.
             </p>
           </div>
           <div className="public-kiosk-status">
@@ -1555,15 +2040,59 @@ export default function App() {
           >
             Queue
           </button>
-          <button
-            className={publicPage === 'standings' ? 'primary-button' : 'ghost-button'}
-            onClick={() => setPublicViewAndUrl('standings')}
-            type="button"
-          >
-            Standings
-          </button>
+          {showPublicRanking ? (
+            <button
+              className={publicPage === 'standings' ? 'primary-button' : 'ghost-button'}
+              onClick={() => setPublicViewAndUrl('standings')}
+              type="button"
+            >
+              Standings
+            </button>
+          ) : null}
         </div>
-        {publicPage === 'standings' ? renderStandingsView() : renderPlayerView()}
+        {publicPage === 'standings' && showPublicRanking ? renderStandingsView() : renderPlayerView()}
+        <footer className="app-footer">
+          Built for CamSur PickleBall Club Open Club by Dev.Onich
+        </footer>
+      </main>
+    );
+  }
+
+  if (!adminUnlocked) {
+    return (
+      <main className="app-shell admin-passcode-shell">
+        <section className="hero hero-slim">
+          <div>
+            <span className="eyebrow">Staff only</span>
+            <h1>Admin passcode</h1>
+            <p>
+              Enter today&apos;s passcode (local date as MMDDYYYY, e.g. April 26, 2026 → 04262026).
+            </p>
+          </div>
+        </section>
+        <section className="panel passcode-panel">
+          <label className="register-field">
+            Passcode
+            <input
+              value={passcodeInput}
+              onChange={(event) => setPasscodeInput(event.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="MMDDYYYY"
+            />
+          </label>
+          {passcodeError ? (
+            <p className="bulk-error" role="alert">
+              {passcodeError}
+            </p>
+          ) : null}
+          <button className="primary-button" type="button" onClick={tryAdminUnlock}>
+            Unlock admin board
+          </button>
+        </section>
+        <footer className="app-footer">
+          Built for CamSur PickleBall Club Open Club by Dev.Onich
+        </footer>
       </main>
     );
   }
@@ -1660,6 +2189,12 @@ export default function App() {
               <a className="ghost-button" href={playerQueueUrl} target="_blank" rel="noreferrer">
                 Player queue link
               </a>
+              <a className="ghost-button" href={registerUrl} target="_blank" rel="noreferrer">
+                Register link
+              </a>
+              <button className="ghost-button" type="button" onClick={lockAdmin}>
+                Lock admin
+              </button>
             </div>
           </section>
 
@@ -1911,7 +2446,7 @@ export default function App() {
                         >
                           <span>
                             {player.name}
-                            <small>{scoreLabel(player)}</small>
+                            <small>{sessionScoreLabel(player)}</small>
                           </span>
                           <span
                             className="color-dot"
@@ -1970,6 +2505,7 @@ export default function App() {
                     <th>Min</th>
                     <th>Max</th>
                     <th>Paddle</th>
+                    <th>Phone</th>
                     <th>Record</th>
                     <th />
                   </tr>
@@ -1988,6 +2524,14 @@ export default function App() {
                       <td>
                         <select
                           value={player.arrivalStatus}
+                          title={
+                            player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing'
+                              ? 'Use courts to finish the match or change assignment.'
+                              : undefined
+                          }
+                          disabled={
+                            player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing'
+                          }
                           onChange={(event) =>
                             onPlayerFieldChange(player.id, 'arrivalStatus', {
                               arrivalStatus: event.target.value as Player['arrivalStatus'],
@@ -2059,7 +2603,24 @@ export default function App() {
                           }
                         />
                       </td>
-                      <td>{scoreLabel(player)}</td>
+                      <td>
+                        <input
+                          value={player.phone}
+                          onChange={(event) =>
+                            onPlayerFieldChange(player.id, 'phone', { phone: event.target.value })
+                          }
+                          placeholder="Optional"
+                          inputMode="tel"
+                        />
+                      </td>
+                      <td className="record-cell">
+                        <div className="record-line">
+                          <small>Today</small> {sessionScoreLabel(player)}
+                        </div>
+                        <div className="record-line">
+                          <small>Overall</small> {overallRecordLabel(player, savedPlayers)}
+                        </div>
+                      </td>
                       <td>
                         <button
                           className="ghost-button danger compact-button"
@@ -2073,7 +2634,7 @@ export default function App() {
                   ))}
                   {rosterInactive.length > 0 && (
                     <tr className="roster-subhead">
-                      <td colSpan={9}>Left or unavailable (still listed for today)</td>
+                      <td colSpan={10}>Left or unavailable (still listed for today)</td>
                     </tr>
                   )}
                   {rosterInactive.map((player) => (
@@ -2089,6 +2650,14 @@ export default function App() {
                       <td>
                         <select
                           value={player.arrivalStatus}
+                          title={
+                            player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing'
+                              ? 'Use courts to finish the match or change assignment.'
+                              : undefined
+                          }
+                          disabled={
+                            player.arrivalStatus === 'assigned' || player.arrivalStatus === 'playing'
+                          }
                           onChange={(event) =>
                             onPlayerFieldChange(player.id, 'arrivalStatus', {
                               arrivalStatus: event.target.value as Player['arrivalStatus'],
@@ -2160,7 +2729,24 @@ export default function App() {
                           }
                         />
                       </td>
-                      <td>{scoreLabel(player)}</td>
+                      <td>
+                        <input
+                          value={player.phone}
+                          onChange={(event) =>
+                            onPlayerFieldChange(player.id, 'phone', { phone: event.target.value })
+                          }
+                          placeholder="Optional"
+                          inputMode="tel"
+                        />
+                      </td>
+                      <td className="record-cell">
+                        <div className="record-line">
+                          <small>Today</small> {sessionScoreLabel(player)}
+                        </div>
+                        <div className="record-line">
+                          <small>Overall</small> {overallRecordLabel(player, savedPlayers)}
+                        </div>
+                      </td>
                       <td>—</td>
                     </tr>
                   ))}
@@ -2171,6 +2757,9 @@ export default function App() {
           </section>
         </section>
       )}
+      <footer className="app-footer">
+        Built for CamSur PickleBall Club Open Club by Dev.Onich
+      </footer>
     </main>
   );
 }

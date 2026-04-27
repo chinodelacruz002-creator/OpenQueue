@@ -1,7 +1,7 @@
 # OpenQueue
 
 OpenQueue is a public open play web app with an admin board and a player queue
-view. It helps a single organizer manage courts, add players through a table,
+view. It hel`ps a single organizer manage courts, add players through a table,
 form standby groups, assign groups to compatible courts, start match timers, and
 track person-by-person results.
 
@@ -49,8 +49,15 @@ create table players (
   wins integer not null default 0,
   losses integer not null default 0,
   games_played integer not null default 0,
-  ranking_score integer not null default 0
+  ranking_score integer not null default 0,
+  phone text not null default ''
 );
+```
+
+Optional unique phone (ignores empty phone):
+
+```sql
+create unique index players_phone_unique on players (phone) where phone <> '';
 ```
 
 Create the live open play state table:
@@ -64,8 +71,16 @@ create table open_play_state (
   max_minutes integer not null default 15,
   saved_paddles text[] not null default '{}',
   saved_grip_colors text[] not null default '{}',
+  show_public_ranking boolean not null default true,
   updated_at timestamptz not null default now()
 );
+```
+
+If you already created these tables, add the new columns:
+
+```sql
+alter table players add column if not exists phone text not null default '';
+alter table open_play_state add column if not exists show_public_ranking boolean not null default true;
 ```
 
 For a public no-login deployment, enable Row Level Security and add public

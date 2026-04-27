@@ -28,6 +28,14 @@ export const GRIP_COLOR_OPTIONS = [
 
 export const LOCAL_STORAGE_KEY = 'openqueue-app-data';
 
+/** localStorage: { playerId, sessionDate } after self-registration */
+export const DEVICE_REGISTRATION_KEY = 'openqueue_device_registration';
+
+/** sessionStorage: admin board unlock flag */
+export const ADMIN_UNLOCK_KEY = 'openqueue_admin_unlocked';
+
+export const normalizePhoneDigits = (phone: string): string => phone.replace(/\D/g, '');
+
 export const getLevelRange = (level: number) => {
   if (level === 1) {
     return { minLevel: 1, maxLevel: 2 };

@@ -1,5 +1,5 @@
 import { logOpenQueueAction } from './actionLog';
-import { LOCAL_STORAGE_KEY } from './constants';
+import { LOCAL_STORAGE_KEY, normalizePhoneDigits } from './constants';
 import type { AppData, Court, Player, SavedPlayer } from './types';
 import { hasSupabaseConfig, supabase } from './utils/supabase';
 
@@ -14,6 +14,7 @@ interface PlayerRow {
   paddle: string;
   grip_color: string;
   preferred_partner_name: string;
+  phone?: string | null;
   wins: number;
   losses: number;
   games_played: number;
@@ -28,8 +29,118 @@ interface OpenPlayStateRow {
   max_minutes: number;
   saved_paddles: string[];
   saved_grip_colors: string[];
+  show_public_ranking?: boolean | null;
   updated_at: string;
 }
+
+const getTodayKey = (): string => new Date().toISOString().slice(0, 10);
+
+const DEFAULT_COURT_COUNT = 4;
+
+const defaultCourtsIfEmpty = (courts: Court[]): Court[] => {
+  if (courts?.length) {
+    return courts;
+  }
+  return Array.from({ length: DEFAULT_COURT_COUNT }, (_, index) => ({
+    id: `court-${index + 1}`,
+    name: `Court ${index + 1}`,
+    minLevel: Math.max(1, index + 1),
+    maxLevel: Math.min(4, index + 2),
+    status: 'ready' as const,
+    match: null,
+  }));
+};
+
+const migratePlayerRecord = (player: Player): Player => ({
+  ...player,
+  phone: player.phone ?? '',
+  joinedQueueAt:
+    player.joinedQueueAt === undefined
+      ? null
+      : player.joinedQueueAt,
+});
+
+const migrateSavedRecord = (saved: SavedPlayer): SavedPlayer => ({
+  ...saved,
+  phone: saved.phone ?? '',
+});
+
+export const migrateAppData = (data: AppData): AppData => ({
+  ...data,
+  sessionDate: data.sessionDate || getTodayKey(),
+  showPublicRanking: data.showPublicRanking !== false,
+  players: (data.players ?? []).map(migratePlayerRecord),
+  savedPlayers: (data.savedPlayers ?? []).map(migrateSavedRecord),
+  courts: data.courts ?? [],
+  maxMinutes: data.maxMinutes ?? 15,
+  savedPaddles: data.savedPaddles ?? [],
+  savedGripColors: data.savedGripColors ?? [],
+});
+
+const phoneConflictInSession = (players: Player[], digits: string, excludeId?: string): boolean => {
+  if (!digits) {
+    return false;
+  }
+  return players.some(
+    (p) => p.id !== excludeId && normalizePhoneDigits(p.phone) === digits,
+  );
+};
+
+export type SelfRegisterResult =
+  | { ok: true; playerId: string }
+  | { ok: false; error: string };
+
+/**
+ * Appends a self-registered player with read–modify–write and retries (best-effort for concurrent admins).
+ */
+export const appendSelfRegisteredPlayer = async (
+  newPlayer: Player,
+): Promise<SelfRegisterResult> => {
+  const digits = normalizePhoneDigits(newPlayer.phone);
+  const nameKey = newPlayer.name.trim().toLowerCase();
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const data = await loadOpenPlayData();
+    if (!data) {
+      return { ok: false, error: 'Could not load current queue. Try again.' };
+    }
+    const base = migrateAppData(data);
+
+    if (digits && phoneConflictInSession(base.players, digits)) {
+      return { ok: false, error: 'That phone number is already checked in today.' };
+    }
+    if (
+      base.players.some((p) => p.name.trim().toLowerCase() === nameKey)
+    ) {
+      return { ok: false, error: 'That name is already on today’s list.' };
+    }
+
+    const savedMatch =
+      digits.length > 0
+        ? base.savedPlayers.find((s) => normalizePhoneDigits(s.phone) === digits)
+        : undefined;
+
+    const playerToAdd: Player = {
+      ...newPlayer,
+      persistentId: savedMatch?.id ?? newPlayer.persistentId,
+    };
+
+    const next: AppData = {
+      ...base,
+      courts: defaultCourtsIfEmpty(base.courts),
+      players: [...base.players, playerToAdd],
+    };
+
+    try {
+      await saveOpenPlayData(next);
+      return { ok: true, playerId: playerToAdd.id };
+    } catch {
+      // Retry on conflict
+    }
+  }
+
+  return { ok: false, error: 'Could not save — try again in a moment.' };
+};
 
 const OPEN_PLAY_STATE_ID = 'current';
 
@@ -67,7 +178,7 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
   const savedPlayers = playerRows.map(mapRowToSavedPlayer);
 
   if (stateError || !stateRow) {
-    return {
+    return migrateAppData({
       sessionDate: getTodayKey(),
       players: [],
       courts: [],
@@ -79,10 +190,11 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
       savedGripColors: uniqueValues([
         ...playerRows.map((row) => row.grip_color),
       ]),
-    };
+      showPublicRanking: true,
+    });
   }
 
-  return {
+  return migrateAppData({
     sessionDate: stateRow.session_date,
     players: stateRow.players ?? [],
     courts: stateRow.courts ?? [],
@@ -96,7 +208,8 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
       ...(stateRow.saved_grip_colors ?? []),
       ...playerRows.map((row) => row.grip_color),
     ]),
-  };
+    showPublicRanking: stateRow.show_public_ranking !== false,
+  });
 };
 
 export const saveOpenPlayData = async (data: AppData): Promise<void> => {
@@ -117,6 +230,7 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
       max_minutes: data.maxMinutes,
       saved_paddles: data.savedPaddles,
       saved_grip_colors: data.savedGripColors,
+      show_public_ranking: data.showPublicRanking,
       updated_at: new Date().toISOString(),
     }),
   ]);
@@ -150,7 +264,7 @@ const loadLocalData = (): AppData | null => {
   }
 
   try {
-    return JSON.parse(rawData) as AppData;
+    return migrateAppData(JSON.parse(rawData) as AppData);
   } catch {
     return null;
   }
@@ -173,6 +287,7 @@ const mapRowToSavedPlayer = (row: PlayerRow): SavedPlayer => ({
   paddle: row.paddle,
   gripColor: row.grip_color,
   preferredPartnerName: row.preferred_partner_name,
+  phone: row.phone ?? '',
   wins: row.wins,
   losses: row.losses,
   gamesPlayed: row.games_played,
@@ -188,6 +303,7 @@ const mapSavedPlayerToRow = (player: SavedPlayer): PlayerRow => ({
   paddle: player.paddle,
   grip_color: player.gripColor,
   preferred_partner_name: player.preferredPartnerName,
+  phone: player.phone || null,
   wins: player.wins,
   losses: player.losses,
   games_played: player.gamesPlayed,
@@ -198,8 +314,6 @@ const uniqueValues = (values: string[]): string[] =>
   Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort(
     (first, second) => first.localeCompare(second),
   );
-
-const getTodayKey = (): string => new Date().toISOString().slice(0, 10);
 
 /**
  * Fires when `open_play_state` changes in Supabase (requires table in the `supabase_realtime` publication).

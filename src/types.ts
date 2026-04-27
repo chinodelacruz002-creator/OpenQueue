@@ -14,15 +14,21 @@ export interface Player {
   paddle: string;
   gripColor: string;
   preferredPartnerName: string;
+  /** Digits-only phone; optional; used for self-check-in and duplicate checks. */
+  phone: string;
   partnerId: string | null;
   arrivalStatus: PlayerStatus;
+  /** Today’s session only (not lifetime). */
   wins: number;
   losses: number;
   gamesPlayed: number;
   waitScore: number;
   lastResult: LastResult;
   lockedGroupId: string | null;
+  /** Today’s session ranking score only. */
   rankingScore: number;
+  /** When this player last entered the waiting queue (`present`); null if not waiting. */
+  joinedQueueAt: number | null;
 }
 
 export interface SavedPlayer {
@@ -34,6 +40,7 @@ export interface SavedPlayer {
   paddle: string;
   gripColor: string;
   preferredPartnerName: string;
+  phone: string;
   wins: number;
   losses: number;
   gamesPlayed: number;
@@ -93,6 +100,7 @@ export interface PlayerForm {
   paddle: string;
   gripColor: string;
   preferredPartnerName: string;
+  phone: string;
   arrivalStatus: PlayerStatus;
 }
 
@@ -113,4 +121,6 @@ export interface AppData {
   savedPlayers: SavedPlayer[];
   savedPaddles: string[];
   savedGripColors: string[];
+  /** When false, public links hide standings and scoring on the queue. */
+  showPublicRanking: boolean;
 }
