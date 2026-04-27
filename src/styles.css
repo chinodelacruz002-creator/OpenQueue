@@ -328,24 +328,18 @@ tr.roster-inactive {
   display: grid;
   place-items: center;
   width: 180px;
-  height: 180px;
+  min-height: 120px;
+  padding: 0.5rem;
+  text-align: center;
   background: hsl(var(--muted));
   border-radius: var(--radius);
 }
 
-.public-queue-qr__spinner {
-  width: 1.5rem;
-  height: 1.5rem;
-  border: 3px solid hsl(var(--border));
-  border-top-color: hsl(var(--primary));
-  border-radius: 50%;
-  animation: public-qr-spin 0.9s linear infinite;
-}
-
-@keyframes public-qr-spin {
-  to {
-    transform: rotate(360deg);
-  }
+.public-queue-qr__fallback {
+  margin: 0;
+  font-size: 0.85rem;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.35;
 }
 
 .public-queue-qr__caption {

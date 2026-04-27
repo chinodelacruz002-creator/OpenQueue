@@ -1,5 +1,9 @@
-import { useEffect, useState } from 'react';
-import QRCode from 'qrcode';
+import { useState } from 'react';
+
+const qrImageUrl = (data: string) =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+    data,
+  )}&margin=1`;
 
 type PublicQueueQrProps = {
   url: string;
@@ -8,49 +12,31 @@ type PublicQueueQrProps = {
 
 /**
  * Renders a scannable code so players can open the public queue on their own phone
- * without retyping the URL.
+ * without retyping the URL. The image is provided by a public QR service (link below still works offline).
  */
 export const PublicQueueQr = ({
   url,
   caption = 'Scan to open the player queue on your phone',
 }: PublicQueueQrProps) => {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    void QRCode.toDataURL(url, {
-      width: 180,
-      margin: 1,
-      color: { dark: '#0f172a', light: '#ffffff' },
-    })
-      .then((data) => {
-        if (active) {
-          setDataUrl(data);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setDataUrl(null);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [url]);
+  const [imageFailed, setImageFailed] = useState(false);
 
   return (
     <div className="public-queue-qr" role="region" aria-label={caption}>
-      {dataUrl ? (
+      {!imageFailed ? (
         <img
           className="public-queue-qr__img"
-          src={dataUrl}
+          src={qrImageUrl(url)}
           width={180}
           height={180}
           alt=""
+          referrerPolicy="no-referrer"
+          onError={() => {
+            setImageFailed(true);
+          }}
         />
       ) : (
         <div className="public-queue-qr__placeholder" aria-hidden>
-          <span className="public-queue-qr__spinner" />
+          <p className="public-queue-qr__fallback">QR image unavailable. Use the link below.</p>
         </div>
       )}
       <p className="public-queue-qr__caption">{caption}</p>
