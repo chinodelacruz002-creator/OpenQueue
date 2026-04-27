@@ -219,8 +219,7 @@ export default function App() {
   const [bulkAddError, setBulkAddError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const savePromiseRef = useRef<Promise<void> | null>(null);
-  /** After applying remote data, skip one debounced save to avoid save↔realtime echo. */
-  const skipNextAutoSaveRef = useRef(false);
+  const flushSaveRef = useRef<(trigger?: string) => Promise<void>>(async () => {});
   const [now, setNow] = useState(0);
 
   const logUserAction = useCallback(
@@ -263,9 +262,15 @@ export default function App() {
         return;
       }
 
-      if (savePromiseRef.current) {
-        await savePromiseRef.current;
-        return;
+      // User-triggered saves must not be dropped if another save is in flight; debounced saves
+      // bail after waiting so we do not duplicate writes for the same revision.
+      let pendingSave = savePromiseRef.current;
+      while (pendingSave) {
+        await pendingSave;
+        if (saveTrigger === 'debounced_state_change') {
+          return;
+        }
+        pendingSave = savePromiseRef.current;
       }
 
       setIsSaving(true);
@@ -298,6 +303,17 @@ export default function App() {
     [buildAppData],
   );
 
+  useEffect(() => {
+    flushSaveRef.current = flushSave;
+  }, [flushSave]);
+
+  /** Run persist after React applies batched state from the current event (avoids stale saves). */
+  const schedulePersistAfterMutation = useCallback((saveTrigger: string) => {
+    window.setTimeout(() => {
+      void flushSaveRef.current(saveTrigger);
+    }, 0);
+  }, []);
+
   const goToViewMode = (mode: 'admin' | 'player') => {
     if (isLockedPublicView) {
       return;
@@ -314,9 +330,6 @@ export default function App() {
   };
 
   const applyLoad = useCallback((data: AppData | null, kind: 'initial' | 'sync') => {
-    if (kind === 'sync') {
-      skipNextAutoSaveRef.current = true;
-    }
     const appData = data ?? createAppData();
     setSessionDate(appData.sessionDate || todayKey());
     setPlayers(appData.players ?? []);
@@ -387,10 +400,6 @@ export default function App() {
 
   useEffect(() => {
     if (isLockedPublicView) {
-      return;
-    }
-    if (skipNextAutoSaveRef.current) {
-      skipNextAutoSaveRef.current = false;
       return;
     }
     const saveTimer = window.setTimeout(() => {
@@ -800,6 +809,7 @@ export default function App() {
         };
       }),
     );
+    schedulePersistAfterMutation('assign_group_to_court');
   };
 
   const autoAssignGroup = (assignment: AutoAssignment) => {
@@ -838,6 +848,7 @@ export default function App() {
         playerIds.includes(player.id) ? { ...player, arrivalStatus: 'playing' } : player,
       ),
     );
+    schedulePersistAfterMutation('start_match');
   };
 
   const toggleMatchWinner = (courtId: string, playerId: string) => {
@@ -858,6 +869,7 @@ export default function App() {
         return { ...court, match: { ...court.match, winnerIds } };
       }),
     );
+    schedulePersistAfterMutation('toggle_match_winner');
   };
 
   const closeMatch = (courtId: string) => {
@@ -921,6 +933,7 @@ export default function App() {
     });
 
     updateCourt(courtId, { status: 'ready', match: null });
+    schedulePersistAfterMutation('close_match');
   };
 
   const resetCourt = (courtId: string) => {
@@ -943,6 +956,7 @@ export default function App() {
     }
 
     updateCourt(courtId, { status: 'ready', match: null });
+    schedulePersistAfterMutation('reset_court');
   };
 
   const removeLoadedPlayer = (courtId: string, removedPlayerId: string) => {
@@ -974,6 +988,7 @@ export default function App() {
         status: 'ready',
         match: null,
       });
+      schedulePersistAfterMutation('remove_loaded_player');
       return;
     }
 
@@ -1003,6 +1018,7 @@ export default function App() {
     );
     updateCourt(courtId, { status: 'loaded', match: nextMatch });
     setSelectedCourtId(courtId);
+    schedulePersistAfterMutation('remove_loaded_player');
   };
 
   const handleDragStart = (
@@ -1040,6 +1056,7 @@ export default function App() {
 
     if (data.type === 'group') {
       assignGroupToCourt(courtId, data.playerIds);
+      // assignGroupToCourt already schedules persist
       return;
     }
 
@@ -1078,6 +1095,7 @@ export default function App() {
           : player,
       ),
     );
+    schedulePersistAfterMutation('return_player_to_queue');
   };
 
   const renderBulkModal = () => (
