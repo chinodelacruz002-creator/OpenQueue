@@ -1,4 +1,7 @@
-import { LOCAL_STORAGE_KEY } from './constants';
+import {
+  LOCAL_STORAGE_KEY,
+  SUPABASE_MIRROR_STORAGE_KEY,
+} from './constants';
 import type { AppData, Court, Player, SavedPlayer } from './types';
 import { hasSupabaseConfig, supabase } from './utils/supabase';
 
@@ -32,12 +35,32 @@ interface OpenPlayStateRow {
 
 const OPEN_PLAY_STATE_ID = 'current';
 
-export const loadOpenPlayData = async (): Promise<AppData | null> => {
-  if (!supabase) {
-    return loadLocalData();
-  }
+let loadOpenPlayInFlight: Promise<AppData | null> | null = null;
 
-  clearLocalData();
+const readMirror = (): AppData | null => {
+  const raw = window.localStorage.getItem(SUPABASE_MIRROR_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as AppData;
+  } catch {
+    return null;
+  }
+};
+
+const writeMirror = (data: AppData): void => {
+  try {
+    window.localStorage.setItem(SUPABASE_MIRROR_STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // Quota or private mode — ignore; network path still works.
+  }
+};
+
+const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
+  if (!supabase) {
+    return null;
+  }
 
   const { data: playerRows, error: playerError } = await supabase
     .from('players')
@@ -46,7 +69,7 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
     .order('name', { ascending: true });
 
   if (playerError) {
-    return null;
+    return readMirror();
   }
 
   const { data: stateRow, error: stateError } = await supabase
@@ -58,7 +81,7 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
   const savedPlayers = playerRows.map(mapRowToSavedPlayer);
 
   if (stateError || !stateRow) {
-    return {
+    const fallback: AppData = {
       sessionDate: getTodayKey(),
       players: [],
       courts: [],
@@ -71,9 +94,11 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
         ...playerRows.map((row) => row.grip_color),
       ]),
     };
+    writeMirror(fallback);
+    return fallback;
   }
 
-  return {
+  const merged: AppData = {
     sessionDate: stateRow.session_date,
     players: stateRow.players ?? [],
     courts: stateRow.courts ?? [],
@@ -88,6 +113,30 @@ export const loadOpenPlayData = async (): Promise<AppData | null> => {
       ...playerRows.map((row) => row.grip_color),
     ]),
   };
+  writeMirror(merged);
+  return merged;
+};
+
+export const loadOpenPlayData = async (): Promise<AppData | null> => {
+  if (!supabase) {
+    return loadLocalData();
+  }
+
+  if (loadOpenPlayInFlight) {
+    return loadOpenPlayInFlight;
+  }
+
+  loadOpenPlayInFlight = (async () => {
+    try {
+      return await fetchOpenPlayFromSupabase();
+    } catch {
+      return readMirror();
+    } finally {
+      loadOpenPlayInFlight = null;
+    }
+  })();
+
+  return loadOpenPlayInFlight;
 };
 
 export const saveOpenPlayData = async (data: AppData): Promise<void> => {
@@ -95,8 +144,6 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
     saveLocalData(data);
     return;
   }
-
-  clearLocalData();
 
   const [playersResult, stateResult] = await Promise.all([
     supabase.from('players').upsert(data.savedPlayers.map(mapSavedPlayerToRow)),
@@ -119,6 +166,8 @@ export const saveOpenPlayData = async (data: AppData): Promise<void> => {
     const message = errors.map((e) => e.message).join('; ');
     throw new Error(message);
   }
+
+  writeMirror(data);
 };
 
 const loadLocalData = (): AppData | null => {
@@ -139,8 +188,31 @@ const saveLocalData = (data: AppData): void => {
   window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
 };
 
-const clearLocalData = (): void => {
-  window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+/**
+ * Fires when `open_play_state` changes in Supabase (requires table in the `supabase_realtime` publication).
+ */
+export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) => {
+  if (!supabase) {
+    return () => {
+      // No-op: Realtime is unavailable without a client.
+    };
+  }
+
+  const client = supabase;
+  const channel = client
+    .channel('open_play_state_changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'open_play_state' },
+      () => {
+        onChange();
+      },
+    )
+    .subscribe();
+
+  return () => {
+    void client.removeChannel(channel);
+  };
 };
 
 const mapRowToSavedPlayer = (row: PlayerRow): SavedPlayer => ({
@@ -179,30 +251,3 @@ const uniqueValues = (values: string[]): string[] =>
   );
 
 const getTodayKey = (): string => new Date().toISOString().slice(0, 10);
-
-/**
- * Fires when `open_play_state` changes in Supabase (requires table in the `supabase_realtime` publication).
- */
-export const subscribeOpenPlayRealtime = (onChange: () => void): (() => void) => {
-  if (!supabase) {
-    return () => {
-      // No-op: Realtime is unavailable without a client.
-    };
-  }
-
-  const client = supabase;
-  const channel = client
-    .channel('open_play_state_changes')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'open_play_state' },
-      () => {
-        onChange();
-      },
-    )
-    .subscribe();
-
-  return () => {
-    void client.removeChannel(channel);
-  };
-};
