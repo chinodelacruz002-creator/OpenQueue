@@ -656,7 +656,7 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    void loadOpenPlayData().then((data) => {
+    void loadOpenPlayData({ preferNetwork: true }).then((data) => {
       if (!mounted) {
         return;
       }
@@ -689,7 +689,7 @@ export default function App() {
         void loadOpenPlayData().then((data) => {
           applyLoad(data, 'sync');
         });
-      }, 25000);
+      }, 8000);
     } else if (needsPoll) {
       timer = window.setInterval(() => {
         void loadOpenPlayData().then((data) => {
@@ -745,10 +745,10 @@ export default function App() {
     const snapshot = buildAppData();
     if (applyLoadInProgressRef.current) {
       applyLoadInProgressRef.current = false;
-      syncMirrorToApp(snapshot);
+      syncMirrorToApp(snapshot, true);
       return;
     }
-    writeOptimisticMirror(snapshot);
+    syncMirrorToApp(snapshot, false);
   }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, queueManualOrder, savedPlayers, sessionDate, showPublicRanking, buildAppData]);
 
   useEffect(() => {
@@ -1245,7 +1245,7 @@ export default function App() {
     });
 
     if (!isLockedPublicView && !isRegisterView) {
-      writeOptimisticMirror(buildAppDataRef.current());
+      syncMirrorToApp(buildAppDataRef.current(), false);
     }
     schedulePersistAfterMutation('assign_group_to_court');
   };

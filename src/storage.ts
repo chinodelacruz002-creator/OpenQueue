@@ -151,8 +151,6 @@ export const appendSelfRegisteredPlayer = async (
 
 const OPEN_PLAY_STATE_ID = 'current';
 
-let loadOpenPlayInFlight: Promise<AppData | null> | null = null;
-
 const MIRROR_VERSION = 1 as const;
 
 interface MirrorEnvelope {
@@ -161,6 +159,8 @@ interface MirrorEnvelope {
   persistenceGen: number;
   savedGen: number;
   serverUpdatedAt: string | null;
+  /** Set when local React state is ahead of last save (edits in flight / debounce). Not bumped on every paint. */
+  clientDirty?: boolean;
 }
 
 const emptyEnvelope = (app: AppData): MirrorEnvelope => ({
@@ -169,6 +169,7 @@ const emptyEnvelope = (app: AppData): MirrorEnvelope => ({
   persistenceGen: 0,
   savedGen: 0,
   serverUpdatedAt: null,
+  clientDirty: false,
 });
 
 const isAppDataShape = (value: unknown): value is AppData => {
@@ -180,32 +181,20 @@ const isAppDataShape = (value: unknown): value is AppData => {
 };
 
 /**
- * Unsaved local edits that must not be replaced by a stale Supabase read.
- * - If we have a server `updated_at` in the mirror, any extra gen is worth guarding.
- * - If not (e.g. no `open_play_state` row yet), we still protect when the session is non-empty
- *   so a missing row + empty "fallback" fetch cannot clear Manage players / bulk updates.
+ * Block applying a network snapshot over local when:
+ * - a save is in flight or failed (persistenceGen > savedGen), or
+ * - local has edits not yet flushed to the server (clientDirty from layout sync).
+ * Do NOT use serverUpdatedAt here — that made every background poll skip the network forever
+ * because layout used to bump gen every frame.
  */
-const localMirrorGuardsUnsaved = (m: MirrorEnvelope | null): boolean => {
-  if (!m || m.persistenceGen <= m.savedGen) {
+const shouldPreferLocalMirrorOverNetwork = (m: MirrorEnvelope | null): boolean => {
+  if (!m) {
     return false;
   }
-  if (m.serverUpdatedAt) {
+  if (m.persistenceGen > m.savedGen) {
     return true;
   }
-  const a = m.app;
-  if (!a) {
-    return false;
-  }
-  if ((a.players?.length ?? 0) > 0) {
-    return true;
-  }
-  if (a.courts?.some((c) => c.match)) {
-    return true;
-  }
-  if ((a.queuePlayerOrder?.length ?? 0) > 0) {
-    return true;
-  }
-  return false;
+  return m.clientDirty === true;
 };
 
 const readMirrorEnvelope = (): MirrorEnvelope | null => {
@@ -265,33 +254,47 @@ export const writeOptimisticMirror = (data: AppData): void => {
     persistenceGen: nextMirrorGeneration(),
     savedGen: prev?.savedGen ?? 0,
     serverUpdatedAt: prev?.serverUpdatedAt ?? null,
+    clientDirty: true,
   };
   writeMirrorEnvelope(next);
 };
 
 /**
- * Update mirror `app` only (keeps `persistenceGen` / `savedGen`). Use after a server-driven
- * `applyLoad` so we do not fake an unsaved local revision.
+ * Update mirror `app` without bumping `persistenceGen` (unlike `writeOptimisticMirror`).
+ * @param fromServer - when true, this snapshot came from the network (`applyLoad`); clears clientDirty.
  */
-export const syncMirrorToApp = (data: AppData): void => {
+export const syncMirrorToApp = (data: AppData, fromServer = false): void => {
+  const app = migrateAppData(data);
   const prev = readMirrorEnvelope();
   if (!prev) {
-    writeOptimisticMirror(migrateAppData(data));
+    writeMirrorEnvelope({
+      v: MIRROR_VERSION,
+      app,
+      persistenceGen: 0,
+      savedGen: 0,
+      serverUpdatedAt: null,
+      clientDirty: fromServer ? false : true,
+    });
     return;
   }
   writeMirrorEnvelope({
     ...prev,
-    app: migrateAppData(data),
+    app,
+    clientDirty: fromServer ? false : true,
   });
 };
 
-const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
+const fetchOpenPlayFromSupabase = async (preferNetwork = false): Promise<AppData | null> => {
   if (!supabase) {
     return null;
   }
 
   const mirrorBeforeFetch = readMirrorEnvelope();
-  if (mirrorBeforeFetch && localMirrorGuardsUnsaved(mirrorBeforeFetch)) {
+  if (
+    !preferNetwork &&
+    mirrorBeforeFetch &&
+    shouldPreferLocalMirrorOverNetwork(mirrorBeforeFetch)
+  ) {
     return migrateAppData(mirrorBeforeFetch.app);
   }
 
@@ -316,7 +319,11 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
   const serverTs = stateRow?.updated_at ?? null;
 
   const mirrorAfterFetch = readMirrorEnvelope();
-  if (mirrorAfterFetch && localMirrorGuardsUnsaved(mirrorAfterFetch)) {
+  if (
+    !preferNetwork &&
+    mirrorAfterFetch &&
+    shouldPreferLocalMirrorOverNetwork(mirrorAfterFetch)
+  ) {
     return migrateAppData(mirrorAfterFetch.app);
   }
 
@@ -333,7 +340,11 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
       queuePlayerOrder: [],
     });
     const afterFallbackRead = readMirrorEnvelope();
-    if (afterFallbackRead && localMirrorGuardsUnsaved(afterFallbackRead)) {
+    if (
+      !preferNetwork &&
+      afterFallbackRead &&
+      shouldPreferLocalMirrorOverNetwork(afterFallbackRead)
+    ) {
       return migrateAppData(afterFallbackRead.app);
     }
     const syncedGen = nextMirrorGeneration();
@@ -343,6 +354,7 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
       persistenceGen: syncedGen,
       savedGen: syncedGen,
       serverUpdatedAt: serverTs ?? new Date(0).toISOString(),
+      clientDirty: false,
     });
     return fallback;
   }
@@ -366,7 +378,11 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
   });
 
   const beforeWriteMerged = readMirrorEnvelope();
-  if (beforeWriteMerged && localMirrorGuardsUnsaved(beforeWriteMerged)) {
+  if (
+    !preferNetwork &&
+    beforeWriteMerged &&
+    shouldPreferLocalMirrorOverNetwork(beforeWriteMerged)
+  ) {
     return migrateAppData(beforeWriteMerged.app);
   }
 
@@ -377,31 +393,29 @@ const fetchOpenPlayFromSupabase = async (): Promise<AppData | null> => {
     persistenceGen: syncedGen,
     savedGen: syncedGen,
     serverUpdatedAt: stateRow.updated_at ?? null,
+    clientDirty: false,
   };
   writeMirrorEnvelope(envelope);
   return merged;
 };
 
-export const loadOpenPlayData = async (): Promise<AppData | null> => {
+export type LoadOpenPlayOptions = {
+  /** When true, always read the latest open_play_state/players (first paint after full reload). */
+  preferNetwork?: boolean;
+};
+
+export const loadOpenPlayData = async (options?: LoadOpenPlayOptions): Promise<AppData | null> => {
   if (!supabase) {
     return loadLocalData();
   }
 
-  if (loadOpenPlayInFlight) {
-    return loadOpenPlayInFlight;
+  const preferNetwork = options?.preferNetwork === true;
+
+  try {
+    return await fetchOpenPlayFromSupabase(preferNetwork);
+  } catch {
+    return readMirrorEnvelope()?.app ?? null;
   }
-
-  loadOpenPlayInFlight = (async () => {
-    try {
-      return await fetchOpenPlayFromSupabase();
-    } catch {
-      return readMirrorEnvelope()?.app ?? null;
-    } finally {
-      loadOpenPlayInFlight = null;
-    }
-  })();
-
-  return loadOpenPlayInFlight;
 };
 
 /**
@@ -417,21 +431,28 @@ export const saveOpenPlayData = async (data: AppData, persistenceGenAtSave: numb
   }
 
   const [playersResult, stateResult] = await Promise.all([
-    supabase.from('players').upsert(data.savedPlayers.map(mapSavedPlayerToRow)),
+    data.savedPlayers.length > 0
+      ? supabase
+          .from('players')
+          .upsert(data.savedPlayers.map(mapSavedPlayerToRow), { onConflict: 'id' })
+      : Promise.resolve({ data: null, error: null } as { data: null; error: null }),
     supabase
       .from('open_play_state')
-      .upsert({
-        id: OPEN_PLAY_STATE_ID,
-        session_date: data.sessionDate,
-        players: data.players,
-        courts: data.courts,
-        max_minutes: data.maxMinutes,
-        saved_paddles: data.savedPaddles,
-        saved_grip_colors: data.savedGripColors,
-        show_public_ranking: data.showPublicRanking,
-        queue_player_order: data.queuePlayerOrder,
-        updated_at: new Date().toISOString(),
-      })
+      .upsert(
+        {
+          id: OPEN_PLAY_STATE_ID,
+          session_date: data.sessionDate,
+          players: data.players,
+          courts: data.courts,
+          max_minutes: data.maxMinutes,
+          saved_paddles: data.savedPaddles,
+          saved_grip_colors: data.savedGripColors,
+          show_public_ranking: data.showPublicRanking,
+          queue_player_order: data.queuePlayerOrder,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' },
+      )
       .select('updated_at')
       .single(),
   ]);
@@ -464,6 +485,7 @@ export const saveOpenPlayData = async (data: AppData, persistenceGenAtSave: numb
       persistenceGen: Math.max(persistenceGenAtSave, 1),
       savedGen: persistenceGenAtSave,
       serverUpdatedAt,
+      clientDirty: false,
     });
     return;
   }
@@ -474,6 +496,7 @@ export const saveOpenPlayData = async (data: AppData, persistenceGenAtSave: numb
     persistenceGen: current.persistenceGen,
     savedGen: persistenceGenAtSave,
     serverUpdatedAt,
+    clientDirty: false,
   });
 };
 
