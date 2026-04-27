@@ -653,11 +653,68 @@ export default function App() {
       JSON.stringify({ playerId: result.playerId, sessionDate: sessionKey }),
     );
     setRegisterDone(
-      `You are on the list for ${sessionKey}. Open the queue link on this device to track your spot.`,
+      `You are on the list for ${sessionKey}. Scroll to “You” below.`,
     );
+    setKioskJoinStep('phone');
+    setKioskPhoneInput('');
+    setKioskMessage(`You are on the list for ${sessionKey}. See “You” below.`);
     setRegisterName('');
     setRegisterPhone('');
     setRegisterLevel(3);
+  };
+
+  const submitReturningFromSaved = async () => {
+    if (!kioskMatchedSaved) {
+      return;
+    }
+    setRegisterError('');
+    setKioskMessage('');
+    const newPlayer = playerFromSavedProfile(kioskMatchedSaved);
+    const result = await appendSelfRegisteredPlayer(newPlayer);
+    if (!result.ok) {
+      setRegisterError(result.error);
+      return;
+    }
+    const data = await loadOpenPlayData();
+    const sessionKey = data?.sessionDate ?? todayKey();
+    localStorage.setItem(
+      DEVICE_REGISTRATION_KEY,
+      JSON.stringify({ playerId: result.playerId, sessionDate: sessionKey }),
+    );
+    setKioskMatchedSaved(null);
+    setKioskJoinStep('phone');
+    setKioskPhoneInput('');
+    setKioskMessage(`Welcome back, ${newPlayer.name}. You are on the list for ${sessionKey}. See “You” below.`);
+  };
+
+  const continueKioskAfterPhone = () => {
+    setRegisterError('');
+    setKioskMessage('');
+    const digits = normalizePhoneDigits(kioskPhoneInput);
+    if (!digits) {
+      setKioskMessage('Enter a phone number.');
+      return;
+    }
+    const inSession = players.find((pl) => normalizePhoneDigits(pl.phone) === digits);
+    if (inSession) {
+      localStorage.setItem(
+        DEVICE_REGISTRATION_KEY,
+        JSON.stringify({ playerId: inSession.id, sessionDate }),
+      );
+      setKioskMessage('You are on today’s list. See “You” below.');
+      setKioskPhoneInput('');
+      return;
+    }
+    const fromSaved = savedPlayers.find((sp) => normalizePhoneDigits(sp.phone) === digits);
+    if (fromSaved) {
+      setKioskMatchedSaved(fromSaved);
+      setKioskJoinStep('returning');
+      return;
+    }
+    setRegisterPhone(kioskPhoneInput.trim());
+    setRegisterName('');
+    setRegisterLevel(3);
+    setKioskJoinStep('new');
   };
 
   const applyLoad = useCallback((data: AppData | null, kind: 'initial' | 'sync') => {
@@ -712,8 +769,7 @@ export default function App() {
   useEffect(() => {
     let timer = 0;
     const needsPoll =
-      !hasSupabaseConfig &&
-      (isLockedPublicView || isRegisterView || viewMode === 'player');
+      !hasSupabaseConfig && (isLockedPublicView || viewMode === 'player');
     if (hasSupabaseConfig) {
       timer = window.setInterval(() => {
         void loadOpenPlayData().then((data) => {
@@ -748,7 +804,7 @@ export default function App() {
     if (!phoneParam) {
       return;
     }
-    setPublicPhoneInput(phoneParam);
+    setKioskPhoneInput(phoneParam);
     const digits = normalizePhoneDigits(phoneParam);
     if (!digits) {
       return;
@@ -759,9 +815,9 @@ export default function App() {
         DEVICE_REGISTRATION_KEY,
         JSON.stringify({ playerId: found.id, sessionDate }),
       );
-      setPublicLookupMessage('This device is now linked to your place in the queue for today.');
+      setKioskMessage('This device is now linked to your place in the queue for today.');
     } else {
-      setPublicLookupMessage('That phone is not on today’s list yet. Register first.');
+      setKioskMessage('That number is not on today’s list yet. Use the form above to check in.');
     }
   }, [isLockedPublicView, players, sessionDate]);
 
@@ -769,7 +825,7 @@ export default function App() {
   // clobbering with stale server rows. Do not bump persistenceGen after `applyLoad` — that
   // would look like an unsaved draft and block cross-client updates.
   useLayoutEffect(() => {
-    if (isLockedPublicView || isRegisterView) {
+    if (isLockedPublicView) {
       return;
     }
     const snapshot = buildAppData();
@@ -782,7 +838,7 @@ export default function App() {
   }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, queueManualOrder, savedPlayers, sessionDate, showPublicRanking, buildAppData]);
 
   useEffect(() => {
-    if (isLockedPublicView || isRegisterView) {
+    if (isLockedPublicView) {
       return;
     }
     const saveTimer = window.setTimeout(() => {
@@ -1274,7 +1330,7 @@ export default function App() {
       );
     });
 
-    if (!isLockedPublicView && !isRegisterView) {
+    if (!isLockedPublicView) {
       syncMirrorToApp(buildAppDataRef.current(), false);
     }
     schedulePersistAfterMutation('assign_group_to_court');
@@ -1982,63 +2038,139 @@ export default function App() {
             </a>
           </p>
         )}
-        {isLockedPublicView && (
+        {isLockedPublicView && myPlayer ? (
           <p className="public-view-link-row">
-            <a className="ghost-button" href={registerUrl}>
-              Register for today&apos;s game
-            </a>
-          </p>
-        )}
-
-        {isLockedPublicView ? (
-          <section className="panel">
-            <div className="panel-title">
-              <UsersRound />
-              <h2>Find your spot with phone</h2>
-            </div>
-            <p className="hint">
-              Use the same digits you gave at check-in. Your place is stored on this device after
-              lookup.
-            </p>
-            <label className="register-field">
-              Phone
-              <input
-                value={publicPhoneInput}
-                onChange={(event) => {
-                  setPublicPhoneInput(event.target.value);
-                  setPublicLookupMessage('');
-                }}
-                inputMode="tel"
-                autoComplete="tel"
-                placeholder="Digits only"
-              />
-            </label>
             <button
-              className="primary-button"
               type="button"
+              className="ghost-button"
               onClick={() => {
-                const digits = normalizePhoneDigits(publicPhoneInput);
-                if (!digits) {
-                  setPublicLookupMessage('Enter a phone number.');
-                  return;
-                }
-                const found = players.find((pl) => normalizePhoneDigits(pl.phone) === digits);
-                if (!found) {
-                  setPublicLookupMessage('Not on today’s list. Register or ask staff.');
-                  return;
-                }
-                localStorage.setItem(
-                  DEVICE_REGISTRATION_KEY,
-                  JSON.stringify({ playerId: found.id, sessionDate }),
-                );
-                setPublicLookupMessage('Saved on this device — scroll to “You”.');
+                localStorage.removeItem(DEVICE_REGISTRATION_KEY);
+                setKioskJoinStep('phone');
+                setKioskMatchedSaved(null);
+                setKioskMessage('');
+                setRegisterError('');
               }}
             >
-              Show my place
+              Check in a different number on this device
             </button>
-            {publicLookupMessage ? (
+          </p>
+        ) : null}
+
+        {isLockedPublicView && !myPlayer ? (
+          <section className="panel public-checkin-panel">
+            <div className="panel-title">
+              <UsersRound />
+              <h2>Check in for {sessionDate}</h2>
+            </div>
+            <p className="hint">
+              Start with your phone number. If you are already in today’s list, we will link this
+              device. If you have a saved profile, you can rejoin in one tap. New players add name
+              and level next.
+            </p>
+            {kioskJoinStep === 'phone' ? (
+              <>
+                <label className="register-field">
+                  Phone number
+                  <input
+                    value={kioskPhoneInput}
+                    onChange={(event) => {
+                      setKioskPhoneInput(event.target.value);
+                      setKioskMessage('');
+                      setRegisterError('');
+                    }}
+                    inputMode="tel"
+                    autoComplete="tel"
+                    placeholder="Mobile number"
+                  />
+                </label>
+                <button className="primary-button" type="button" onClick={continueKioskAfterPhone}>
+                  Continue
+                </button>
+              </>
+            ) : null}
+            {kioskJoinStep === 'returning' && kioskMatchedSaved ? (
+              <div className="public-checkin-step">
+                <p className="hint">
+                  Welcome back, <strong>{kioskMatchedSaved.name}</strong> (level {kioskMatchedSaved.level}).
+                </p>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => {
+                    void submitReturningFromSaved();
+                  }}
+                >
+                  Add me to today&apos;s queue
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    setKioskJoinStep('phone');
+                    setKioskMatchedSaved(null);
+                    setRegisterError('');
+                  }}
+                >
+                  Use a different number
+                </button>
+              </div>
+            ) : null}
+            {kioskJoinStep === 'new' ? (
+              <div className="public-checkin-step">
+                <p className="hint">Phone: {registerPhone || kioskPhoneInput}</p>
+                <label className="register-field">
+                  Name
+                  <input
+                    value={registerName}
+                    onChange={(event) => setRegisterName(event.target.value)}
+                    placeholder="Your name"
+                    autoComplete="name"
+                  />
+                </label>
+                <label className="register-field">
+                  Level
+                  <select
+                    value={registerLevel}
+                    onChange={(event) => setRegisterLevel(Number(event.target.value))}
+                  >
+                    {LEVELS.map((level) => (
+                      <option value={level} key={level}>
+                        {level}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="register-actions">
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => {
+                      void submitSelfRegister();
+                    }}
+                  >
+                    Join today&apos;s queue
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => {
+                      setKioskJoinStep('phone');
+                      setRegisterError('');
+                    }}
+                  >
+                    Back
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {registerError ? (
+              <p className="bulk-error" role="alert">
+                {registerError}
+              </p>
+            ) : null}
+            {kioskMessage ? (
               <p className="hint" role="status">
-                {publicLookupMessage}
+                {kioskMessage}
               </p>
             ) : null}
           </section>
@@ -2126,6 +2258,9 @@ export default function App() {
           <div className="public-list">
             {courts.map((court) => {
               const elapsedSeconds = getElapsedSeconds(court.match, now);
+              const publicTimer = court.match
+                ? getMatchTimerState(court.match, now)
+                : 'idle';
               const fourNames =
                 court.match?.players.map((player) => player.name).join(' · ') || '';
               const emptyCourtLabel =
@@ -2145,7 +2280,23 @@ export default function App() {
                   )}
                   <small>
                     {court.status}
-                    {court.match?.startedAt ? ` · ${formatElapsedTime(elapsedSeconds)}` : ''}
+                    {court.match?.startedAt ? (
+                      <>
+                        {' '}
+                        ·{' '}
+                        <span
+                          className={
+                            publicTimer === 'over'
+                              ? 'public-court-timer public-court-timer-over'
+                              : publicTimer === 'warning'
+                                ? 'public-court-timer public-court-timer-warn'
+                                : 'public-court-timer'
+                          }
+                        >
+                          {formatElapsedTime(elapsedSeconds)}
+                        </span>
+                      </>
+                    ) : null}
                   </small>
                 </article>
               );
@@ -2236,76 +2387,6 @@ export default function App() {
       </section>
     );
   };
-
-  if (isRegisterView) {
-    return (
-      <main className="app-shell register-shell">
-        <section className="hero hero-slim">
-          <div>
-            <span className="eyebrow">Self check-in</span>
-            <h1>Register for today&apos;s game</h1>
-            <p>
-              Add yourself to the queue for {sessionDate}. Add your phone so you can find your
-              place on the public queue link and so staff can match your profile.
-            </p>
-          </div>
-        </section>
-        <section className="panel register-panel">
-          <label className="register-field">
-            Name
-            <input
-              value={registerName}
-              onChange={(event) => setRegisterName(event.target.value)}
-              placeholder="Your name"
-              autoComplete="name"
-            />
-          </label>
-          <label className="register-field">
-            Level
-            <select
-              value={registerLevel}
-              onChange={(event) => setRegisterLevel(Number(event.target.value))}
-            >
-              {LEVELS.map((level) => (
-                <option value={level} key={level}>
-                  {level}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="register-field">
-            Phone
-            <input
-              value={registerPhone}
-              onChange={(event) => setRegisterPhone(event.target.value)}
-              placeholder="Digits — used on the queue view and to avoid dupes"
-              inputMode="tel"
-              autoComplete="tel"
-            />
-          </label>
-          {registerError ? (
-            <p className="bulk-error" role="alert">
-              {registerError}
-            </p>
-          ) : null}
-          {registerDone ? (
-            <p className="hint" role="status">
-              {registerDone}
-            </p>
-          ) : null}
-          <div className="register-actions">
-            <button className="primary-button" type="button" onClick={() => void submitSelfRegister()}>
-              Join today&apos;s queue
-            </button>
-            <a className="ghost-button" href={playerQueueUrl}>
-              Open queue view
-            </a>
-          </div>
-        </section>
-        <footer className="app-footer">{BRAND_FOOTER}</footer>
-      </main>
-    );
-  }
 
   if (isLockedPublicView) {
     return (
@@ -2476,10 +2557,7 @@ export default function App() {
                 Settings
               </button>
               <a className="ghost-button" href={playerQueueUrl} target="_blank" rel="noreferrer">
-                Player queue link
-              </a>
-              <a className="ghost-button" href={registerUrl} target="_blank" rel="noreferrer">
-                Register link
+                Player queue &amp; check-in
               </a>
               <button className="ghost-button" type="button" onClick={lockAdmin}>
                 Lock admin
@@ -2491,9 +2569,13 @@ export default function App() {
             {courts.map((court) => {
               const match = court.match;
               const elapsedSeconds = getElapsedSeconds(match, now);
-              const isOverTime = Boolean(
-                match?.startedAt && elapsedSeconds >= match.durationMinutes * 60,
-              );
+              const timerState = getMatchTimerState(match, now);
+              const timerClass =
+                timerState === 'over'
+                  ? 'timer timer-over'
+                  : timerState === 'warning'
+                    ? 'timer timer-warn'
+                    : 'timer';
 
               return (
                 <article
@@ -2543,7 +2625,7 @@ export default function App() {
                     <div className="match-card court-surface">
                       <span className="kitchen-line top" aria-hidden="true" />
                       <span className="kitchen-line bottom" aria-hidden="true" />
-                      <div className={`timer ${isOverTime ? 'overtime' : ''}`}>
+                      <div className={timerClass}>
                         <Clock3 size={18} />
                         {formatElapsedTime(elapsedSeconds)} /{' '}
                         {court.match.durationMinutes}:00

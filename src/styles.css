@@ -785,10 +785,34 @@ select {
   gap: 0.45rem;
   font-size: 1.25rem;
   font-weight: 900;
+  color: #0f172a;
 }
 
-.timer.overtime {
-  color: #b45309;
+/* Last 60s before max — warning (orange) */
+.timer.timer-warn,
+.timer-warn {
+  color: #c2410c;
+  font-weight: 900;
+}
+
+/* Past max time — over (red) */
+.timer.timer-over,
+.timer-over {
+  color: #b91c1c;
+  font-weight: 900;
+}
+
+.public-court-timer {
+  font-weight: 800;
+  color: #334155;
+}
+
+.public-court-timer-warn {
+  color: #c2410c;
+}
+
+.public-court-timer-over {
+  color: #b91c1c;
 }
 
 .lock-note {
@@ -1314,6 +1338,12 @@ select {
   padding: 0.5rem 0.65rem;
   border-radius: 0.5rem;
   border: 1px solid #cbd5e1;
+}
+
+.public-checkin-panel .public-checkin-step {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
 }
 
 .register-actions {
