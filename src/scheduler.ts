@@ -83,6 +83,27 @@ export const getElapsedSeconds = (match: Match | null, now: number): number => {
   return Math.floor((now - match.startedAt) / 1000);
 };
 
+export type MatchTimerState = 'idle' | 'ok' | 'warning' | 'over';
+
+/** Last 60s before limit → `warning`; at or over limit → `over`. */
+export const getMatchTimerState = (match: Match | null, now: number): MatchTimerState => {
+  if (!match?.startedAt) {
+    return 'idle';
+  }
+  const elapsed = getElapsedSeconds(match, now);
+  const maxSec = Math.max(0, (match.durationMinutes ?? 0) * 60);
+  if (maxSec <= 0) {
+    return 'ok';
+  }
+  if (elapsed >= maxSec) {
+    return 'over';
+  }
+  if (elapsed >= maxSec - 60) {
+    return 'warning';
+  }
+  return 'ok';
+};
+
 export const formatElapsedTime = (seconds: number): string => {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;

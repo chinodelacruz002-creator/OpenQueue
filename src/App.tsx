@@ -35,6 +35,7 @@ import {
   formatElapsedTime,
   getAvailablePlayers,
   getElapsedSeconds,
+  getMatchTimerState,
 } from './scheduler';
 import {
   appendSelfRegisteredPlayer,
@@ -75,7 +76,6 @@ const isLockedPublicView = (() => {
   const param = getInitialViewParam();
   return param === 'player' || param === 'standings';
 })();
-const isRegisterView = getInitialViewParam() === 'register';
 
 const getExpectedAdminAccessCode = (): string =>
   (import.meta.env.VITE_ADMIN_ACCESS_CODE as string | undefined)?.trim() ?? '';
@@ -167,6 +167,30 @@ const createAppData = (): AppData => ({
   savedGripColors: GRIP_COLOR_OPTIONS,
   showPublicRanking: true,
   queuePlayerOrder: [],
+});
+
+/** Rejoin: same profile, new session player id, linked to saved profile id. */
+const playerFromSavedProfile = (sp: SavedPlayer): Player => ({
+  id: crypto.randomUUID(),
+  persistentId: sp.id,
+  name: sp.name,
+  level: sp.level,
+  minLevel: sp.minLevel,
+  maxLevel: sp.maxLevel,
+  paddle: sp.paddle,
+  gripColor: sp.gripColor,
+  preferredPartnerName: sp.preferredPartnerName,
+  phone: sp.phone,
+  partnerId: null,
+  arrivalStatus: 'present',
+  wins: 0,
+  losses: 0,
+  gamesPlayed: 0,
+  waitScore: 0,
+  lastResult: null,
+  lockedGroupId: null,
+  rankingScore: sp.rankingScore,
+  joinedQueueAt: Date.now(),
 });
 
 const mergeSavedAfterMatch = (
@@ -325,9 +349,12 @@ const replacePlayerInMatch = (
 
 export default function App() {
   const pagePath = window.location.pathname;
+  if (new URLSearchParams(window.location.search).get('view') === 'register') {
+    window.location.replace(`${pagePath}?view=player`);
+    return null;
+  }
   const playerQueueUrl = `${pagePath}?view=player`;
   const standingsUrl = `${pagePath}?view=standings`;
-  const registerUrl = `${pagePath}?view=register`;
   const initialViewParam = getInitialViewParam();
   const [players, setPlayers] = useState<Player[]>([]);
   const [savedPlayers, setSavedPlayers] = useState<SavedPlayer[]>([]);
@@ -368,8 +395,11 @@ export default function App() {
   const [registerDone, setRegisterDone] = useState('');
   /** Manual order of waiting `present` players for standby groups (swap / reorder). */
   const [queueManualOrder, setQueueManualOrder] = useState<string[]>([]);
-  const [publicPhoneInput, setPublicPhoneInput] = useState('');
-  const [publicLookupMessage, setPublicLookupMessage] = useState('');
+  /** Public queue (`?view=player`): join flow — phone first, then new profile or returning saved player. */
+  const [kioskJoinStep, setKioskJoinStep] = useState<'phone' | 'returning' | 'new'>('phone');
+  const [kioskPhoneInput, setKioskPhoneInput] = useState('');
+  const [kioskMatchedSaved, setKioskMatchedSaved] = useState<SavedPlayer | null>(null);
+  const [kioskMessage, setKioskMessage] = useState('');
 
   const logUserAction = useCallback(
     (
