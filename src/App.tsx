@@ -1684,6 +1684,8 @@ export default function App() {
             <p>
               Type a new player or pick a saved profile to auto-fill level. Phone is optional; if you
               leave it blank, the system stores an internal ID until you add a real number later.
+              Use Tab to move Player → Level → next row; min/max follow the level automatically (click
+              to adjust if needed).
             </p>
           </div>
           <div className="bulk-modal-header-actions">
@@ -1766,6 +1768,7 @@ export default function App() {
                     </td>
                     <td>
                       <select
+                        tabIndex={-1}
                         value={row.minLevel}
                         onChange={(event) =>
                           onBulkFieldChange(row.rowId, 'minLevel', () =>
@@ -1784,6 +1787,7 @@ export default function App() {
                     </td>
                     <td>
                       <select
+                        tabIndex={-1}
                         value={row.maxLevel}
                         onChange={(event) =>
                           onBulkFieldChange(row.rowId, 'maxLevel', () =>
@@ -1802,6 +1806,7 @@ export default function App() {
                     </td>
                     <td>
                       <input
+                        tabIndex={-1}
                         value={row.phone}
                         onChange={(event) =>
                           onBulkFieldChange(row.rowId, 'phone', () =>
@@ -1818,6 +1823,7 @@ export default function App() {
                     </td>
                     <td>
                       <button
+                        tabIndex={-1}
                         className="ghost-button danger compact-button"
                         type="button"
                         onClick={() => clearBulkRow(row.rowId)}
@@ -2833,16 +2839,6 @@ export default function App() {
                           </div>
                         ))
                       )}
-                    </div>
-                    <div className="compatibility-list">
-                      Can play:{' '}
-                      {group.compatibleCourtIds.length
-                        ? group.compatibleCourtIds
-                            .map((courtId) =>
-                              courts.find((court) => court.id === courtId)?.name,
-                            )
-                            .join(', ')
-                        : '—'}
                     </div>
                   </article>
                 );
