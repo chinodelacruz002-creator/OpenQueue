@@ -68,6 +68,17 @@ const BRAND_FOOTER = 'OpenQueue · Camsur Pickleball Club';
 
 const normalizePlayerName = (name: string) => name.trim().toLowerCase();
 
+/**
+ * Digits-only placeholder so admin can add a name without a phone yet while the DB unique-phone
+ * index still gets a distinct value (not shown as a real number in the UI).
+ */
+const generateAdminPlaceholderPhone = (): string => {
+  const hex = crypto.randomUUID().replace(/-/g, '');
+  const n = BigInt(`0x${hex}`);
+  const tail = (n % 10n ** 15n).toString().padStart(15, '0');
+  return `0${tail}`;
+};
+
 const persistenceLabel = (): 'supabase' | 'local' =>
   hasSupabaseConfig ? 'supabase' : 'local';
 
@@ -410,8 +421,6 @@ export default function App() {
   const [registerPhone, setRegisterPhone] = useState('');
   const [registerLevel, setRegisterLevel] = useState(3);
   const [registerError, setRegisterError] = useState('');
-  /** Manual order of waiting `present` players for standby groups (swap / reorder). */
-  const [queueManualOrder, setQueueManualOrder] = useState<string[]>([]);
   /** Public queue (`?view=player`): join flow — phone first, then new profile or returning saved player. */
   const [kioskJoinStep, setKioskJoinStep] = useState<'phone' | 'returning' | 'new'>('phone');
   const [kioskPhoneInput, setKioskPhoneInput] = useState('');
@@ -449,7 +458,7 @@ export default function App() {
       savedPaddles: paddleOptions,
       savedGripColors: gripColorOptions,
       showPublicRanking,
-      queuePlayerOrder: queueManualOrder,
+      queuePlayerOrder: [],
     }),
     [
       courts,
@@ -457,7 +466,6 @@ export default function App() {
       maxMinutes,
       paddleOptions,
       players,
-      queueManualOrder,
       savedPlayers,
       sessionDate,
       showPublicRanking,
@@ -561,7 +569,6 @@ export default function App() {
     }
     logUserAction('full_reset_today', 'admin.full_reset', 'applied');
     setPlayers([]);
-    setQueueManualOrder([]);
     setCourts((c) => resetCourtsKeepingLayout(c));
     setBulkRows(createInitialBulkRows());
     await flushSave('full_reset_today');
@@ -593,7 +600,6 @@ export default function App() {
     }));
     setPlayers(nextPlayers);
     setBulkRows(buildBulkRowsFromPlayers(nextPlayers));
-    setQueueManualOrder([]);
     setCourts((c) => resetCourtsKeepingLayout(c));
     await flushSave('clear_all_today');
   };
@@ -741,7 +747,6 @@ export default function App() {
     setPaddleOptions(mergeOptions(PADDLE_OPTIONS, appData.savedPaddles ?? []));
     setGripColorOptions(mergeOptions(GRIP_COLOR_OPTIONS, appData.savedGripColors ?? []));
     setShowPublicRanking(appData.showPublicRanking !== false);
-    setQueueManualOrder(appData.queuePlayerOrder ?? []);
     if (kind === 'initial') {
       setSaveStatus(hasSupabaseConfig ? 'Connected to Supabase' : 'Local-only (this browser)');
     } else {
@@ -804,11 +809,6 @@ export default function App() {
   }, [applyLoad, viewMode]);
 
   useEffect(() => {
-    const ids = new Set(players.map((p) => p.id));
-    setQueueManualOrder((prev) => prev.filter((id) => ids.has(id)));
-  }, [players]);
-
-  useEffect(() => {
     if (!isLockedPublicView) {
       return;
     }
@@ -848,7 +848,7 @@ export default function App() {
       return;
     }
     syncMirrorToApp(snapshot, false);
-  }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, queueManualOrder, savedPlayers, sessionDate, showPublicRanking, buildAppData]);
+  }, [courts, gripColorOptions, maxMinutes, paddleOptions, players, savedPlayers, sessionDate, showPublicRanking, buildAppData]);
 
   useEffect(() => {
     if (isLockedPublicView) {
@@ -865,7 +865,6 @@ export default function App() {
     maxMinutes,
     paddleOptions,
     players,
-    queueManualOrder,
     savedPlayers,
     sessionDate,
     showPublicRanking,
@@ -881,14 +880,8 @@ export default function App() {
 
   const orderedAvailablePlayers = useMemo(() => {
     const waiting = getAvailablePlayers(players);
-    const byId = new Map(waiting.map((p) => [p.id, p]));
-    const listed = queueManualOrder
-      .map((id) => byId.get(id))
-      .filter((p): p is Player => Boolean(p));
-    const listedIds = new Set(listed.map((p) => p.id));
-    const rest = waiting.filter((p) => !listedIds.has(p.id));
-    return [...listed, ...rest];
-  }, [players, queueManualOrder]);
+    return [...waiting].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }, [players]);
 
   const queueGroups = useMemo(
     () => createGroupsFromAvailablePlayers(orderedAvailablePlayers, courts),
@@ -1003,7 +996,7 @@ export default function App() {
       level: savedPlayer.level,
       minLevel: savedPlayer.minLevel,
       maxLevel: savedPlayer.maxLevel,
-      paddle: savedPlayer.paddle,
+      paddle: '',
       gripColor: '',
       preferredPartnerName: '',
       phone: savedPlayer.phone ?? '',
@@ -1079,7 +1072,7 @@ export default function App() {
           level: Number(row.level),
           minLevel: Number(row.minLevel),
           maxLevel: Number(row.maxLevel),
-          paddle: row.paddle.trim(),
+          paddle: '',
           preferredPartnerName: row.preferredPartnerName.trim(),
           phone: row.phone.trim(),
         } satisfies Player;
@@ -1092,7 +1085,7 @@ export default function App() {
         level: Number(row.level),
         minLevel: Number(row.minLevel),
         maxLevel: Number(row.maxLevel),
-        paddle: row.paddle.trim(),
+        paddle: '',
         gripColor: '',
         preferredPartnerName: row.preferredPartnerName.trim(),
         phone: row.phone.trim(),
@@ -1145,6 +1138,23 @@ export default function App() {
       }
     }
 
+    const usedPhones = new Set(
+      editedPlayers
+        .map((p) => normalizePhoneDigits(p.phone))
+        .filter((d) => d.length > 0),
+    );
+    const withPlaceholderPhones = editedPlayers.map((player) => {
+      if (normalizePhoneDigits(player.phone)) {
+        return player;
+      }
+      let placeholder = '';
+      do {
+        placeholder = generateAdminPlaceholderPhone();
+      } while (usedPhones.has(placeholder));
+      usedPhones.add(placeholder);
+      return { ...player, phone: placeholder };
+    });
+
     if (duplicateInForm.length || alreadyInRoster.length) {
       const parts: string[] = [];
       if (duplicateInForm.length) {
@@ -1165,7 +1175,7 @@ export default function App() {
     }
 
     const { players: sessionWithSaved, savedPlayers: mergedSaved } =
-      ensureSavedProfilesForSession(editedPlayers, savedPlayers);
+      ensureSavedProfilesForSession(withPlaceholderPhones, savedPlayers);
 
     logUserAction('bulk_update_players', 'bulk_modal.update_players', 'applied', {
       detail: { playerCount: sessionWithSaved.length },
@@ -1484,8 +1494,6 @@ export default function App() {
 
     const nextPlayers = [...keptPlayers, ...returningWinners, ...returningLosers];
     setPlayers(nextPlayers);
-    setQueueManualOrder(nextPlayers.map((p) => p.id));
-
     updateCourt(courtId, { status: 'ready', match: null });
     schedulePersistAfterMutation('close_match');
   };
@@ -1667,65 +1675,6 @@ export default function App() {
     schedulePersistAfterMutation('return_player_to_queue');
   };
 
-  const swapQueuePlayers = useCallback(
-    (playerIdA: string, playerIdB: string) => {
-      if (playerIdA === playerIdB) {
-        return;
-      }
-      setQueueManualOrder((prev) => {
-        const waiting = getAvailablePlayers(players);
-        const base =
-          prev.length > 0
-            ? prev.filter((id) => waiting.some((p) => p.id === id))
-            : waiting.map((p) => p.id);
-        const i = base.indexOf(playerIdA);
-        const j = base.indexOf(playerIdB);
-        if (i < 0 || j < 0) {
-          return prev;
-        }
-        const next = [...base];
-        const tmp = next[i]!;
-        next[i] = next[j]!;
-        next[j] = tmp;
-        return next;
-      });
-      schedulePersistAfterMutation('queue_reorder');
-    },
-    [players, schedulePersistAfterMutation],
-  );
-
-  const handleStandbyPlayerDrop = useCallback(
-    (event: DragEvent<HTMLElement>, targetPlayerId: string) => {
-      event.preventDefault();
-      event.stopPropagation();
-      let data: DragData;
-      try {
-        const rawData = event.dataTransfer.getData('application/json');
-        data = JSON.parse(rawData) as DragData;
-      } catch {
-        return;
-      }
-      if (data.type !== 'player' || data.playerId === targetPlayerId) {
-        return;
-      }
-      const dragging = players.find((p) => p.id === data.playerId);
-      const target = players.find((p) => p.id === targetPlayerId);
-      if (
-        !dragging ||
-        !target ||
-        dragging.arrivalStatus !== 'present' ||
-        target.arrivalStatus !== 'present'
-      ) {
-        return;
-      }
-      logUserAction('queue_swap', 'queue.standby_swap', 'applied', {
-        detail: { a: data.playerId, b: targetPlayerId },
-      });
-      swapQueuePlayers(dragging.id, target.id);
-    },
-    [players, logUserAction, swapQueuePlayers],
-  );
-
   const renderBulkModal = () => (
     <div className="modal-backdrop" role="presentation">
       <section className="bulk-modal" aria-labelledby="bulk-add-title" role="dialog">
@@ -1733,8 +1682,8 @@ export default function App() {
           <div>
             <h2 id="bulk-add-title">Manage Players</h2>
             <p>
-              Type a new player or select an existing saved player. Existing
-              players auto-fill paddle, level, and grip color.
+              Type a new player or pick a saved profile to auto-fill level. Phone is optional; if you
+              leave it blank, the system stores an internal ID until you add a real number later.
             </p>
           </div>
           <div className="bulk-modal-header-actions">
@@ -1778,7 +1727,6 @@ export default function App() {
                   <th>Lvl</th>
                   <th>Min</th>
                   <th>Max</th>
-                  <th>Paddle</th>
                   <th>Phone</th>
                   <th>Status</th>
                   <th />
@@ -1854,18 +1802,6 @@ export default function App() {
                     </td>
                     <td>
                       <input
-                        list="paddle-options"
-                        value={row.paddle}
-                        onChange={(event) =>
-                          onBulkFieldChange(row.rowId, 'paddle', () =>
-                            updateBulkRow(row.rowId, { paddle: event.target.value }),
-                          )
-                        }
-                        placeholder="Paddle"
-                      />
-                    </td>
-                    <td>
-                      <input
                         value={row.phone}
                         onChange={(event) =>
                           onBulkFieldChange(row.rowId, 'phone', () =>
@@ -1897,11 +1833,6 @@ export default function App() {
           <datalist id="bulk-saved-player-names">
             {savedPlayers.map((player) => (
               <option value={player.name} key={player.id} />
-            ))}
-          </datalist>
-          <datalist id="paddle-options">
-            {paddleOptions.map((option) => (
-              <option value={option} key={option} />
             ))}
           </datalist>
         </div>
@@ -2321,7 +2252,7 @@ export default function App() {
                   </span>
                 </strong>
                 <span>
-                  In line (FIFO) · L{player.level}
+                  In line (by name) · L{player.level}
                   {myPlayer && player.id === myPlayer.id
                     ? ' · you'
                     : ''}
@@ -2841,8 +2772,7 @@ export default function App() {
             </div>
             <p className="hint">
               Four group slots; each group lists one player per row. Drag a full group of four to a
-              free ready court (timer starts on drop). Drag a player onto another waiting player to
-              swap order and regroup.
+              free ready court (timer starts on drop). Waiting order is alphabetical by name.
             </p>
 
             <div className="queue-grid queue-grid-standby">
@@ -2887,16 +2817,7 @@ export default function App() {
                         group.players.map((player) => (
                           <div
                             className="player-chip"
-                            draggable
                             key={player.id}
-                            onDragStart={(event) =>
-                              handleDragStart(event, {
-                                type: 'player',
-                                playerId: player.id,
-                              })
-                            }
-                            onDragOver={(event) => event.preventDefault()}
-                            onDrop={(event) => handleStandbyPlayerDrop(event, player.id)}
                           >
                             <span>
                               <span className="player-chip-level">L{player.level}</span>
@@ -2935,8 +2856,8 @@ export default function App() {
               <h2>Players</h2>
             </div>
             <p className="hint player-table-hint">
-              Min / max level and phone are edited only in Manage players. Waiting players are listed
-              first; people on court appear in the section below.
+              Min / max level and phone are edited only in Manage players. Paddle is not used for now.
+              Waiting players are listed first; people on court appear in the section below.
             </p>
             <div className="player-admin-table-wrap">
               <table className="player-admin-table">
@@ -2946,7 +2867,6 @@ export default function App() {
                     <th>Name</th>
                     <th>Status</th>
                     <th>Lvl</th>
-                    <th>Paddle</th>
                     <th>Record</th>
                     <th />
                   </tr>
@@ -2960,7 +2880,7 @@ export default function App() {
                           draggable
                           role="button"
                           tabIndex={0}
-                          title="Drag onto a standby player to swap queue order"
+                          title="Drag to return a waiting player to the queue strip"
                           onDragStart={(event) =>
                             handleDragStart(event, { type: 'player', playerId: player.id })
                           }
@@ -3015,15 +2935,6 @@ export default function App() {
                           ))}
                         </select>
                       </td>
-                      <td>
-                        <input
-                          list="paddle-options"
-                          value={player.paddle}
-                          onChange={(event) =>
-                            onPlayerFieldChange(player.id, 'paddle', { paddle: event.target.value })
-                          }
-                        />
-                      </td>
                       <td className="record-cell">
                         {sessionDayRecordLabel(player)}
                       </td>
@@ -3040,7 +2951,7 @@ export default function App() {
                   ))}
                   {rosterOnCourt.length > 0 && (
                     <tr className="roster-subhead">
-                      <td colSpan={7}>On court (playing) — use courts above for match</td>
+                      <td colSpan={6}>On court (playing) — use courts above for match</td>
                     </tr>
                   )}
                   {rosterOnCourt.map((player) => (
@@ -3067,9 +2978,6 @@ export default function App() {
                           ))}
                         </select>
                       </td>
-                      <td>
-                        <input value={player.paddle} readOnly title="Edit in Manage players" />
-                      </td>
                       <td className="record-cell">{sessionDayRecordLabel(player)}</td>
                       <td>
                         <button
@@ -3085,7 +2993,7 @@ export default function App() {
                   ))}
                   {rosterInactive.length > 0 && (
                     <tr className="roster-subhead">
-                      <td colSpan={7}>Left or unavailable (still listed for today)</td>
+                      <td colSpan={6}>Left or unavailable (still listed for today)</td>
                     </tr>
                   )}
                   {rosterInactive.map((player) => (
@@ -3137,15 +3045,6 @@ export default function App() {
                             </option>
                           ))}
                         </select>
-                      </td>
-                      <td>
-                        <input
-                          list="paddle-options"
-                          value={player.paddle}
-                          onChange={(event) =>
-                            onPlayerFieldChange(player.id, 'paddle', { paddle: event.target.value })
-                          }
-                        />
                       </td>
                       <td className="record-cell">
                         {sessionDayRecordLabel(player)}
