@@ -277,6 +277,23 @@ button {
   font-size: clamp(1.8rem, 4vw, 2.6rem);
 }
 
+.public-hero-club {
+  margin: 0.45rem 0 0;
+  color: rgb(255 255 255 / 0.95);
+  font-size: clamp(1rem, 2.5vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.public-hero-meta {
+  margin: 0.4rem 0 0;
+  max-width: 56rem;
+  color: rgb(255 255 255 / 0.88);
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
 .public-nav {
   display: flex;
   justify-content: center;
@@ -1644,6 +1661,35 @@ a.primary-button {
   color: hsl(202 45% 40%);
   background: linear-gradient(180deg, hsl(210 40% 98.5%) 0%, var(--brand-white) 100%);
   border-top: 1px solid hsl(var(--border));
+}
+
+.app-footer--brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 1.25rem 1.25rem 1.5rem;
+}
+
+.app-footer__title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: hsl(202 45% 28%);
+  letter-spacing: -0.02em;
+}
+
+.app-footer__subtitle {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: hsl(202 40% 38%);
+}
+
+.app-footer__credit {
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: hsl(202 25% 48%);
+  letter-spacing: 0.02em;
 }
 
 .register-shell .register-panel,

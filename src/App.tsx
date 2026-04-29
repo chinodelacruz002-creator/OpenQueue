@@ -64,7 +64,14 @@ import './styles.css';
 const DEFAULT_COURTS = 4;
 const DEFAULT_MAX_MINUTES = 15;
 const SAVE_DEBOUNCE_MS = 500;
-const BRAND_FOOTER = 'OpenQueue · Camsur Pickleball Club';
+
+const AppFooter = () => (
+  <footer className="app-footer app-footer--brand" role="contentinfo">
+    <div className="app-footer__title">OpenQueue</div>
+    <div className="app-footer__subtitle">Camsur Pickleball Club</div>
+    <div className="app-footer__credit">cursor.ai | dev.onich</div>
+  </footer>
+);
 
 const normalizePlayerName = (name: string) => name.trim().toLowerCase();
 
@@ -1684,6 +1691,8 @@ export default function App() {
             <p>
               Type a new player or pick a saved profile to auto-fill level. Phone is optional; if you
               leave it blank, the system stores an internal ID until you add a real number later.
+              Use Tab to move Player → Level → next row; min/max follow the level automatically (click
+              to adjust if needed).
             </p>
           </div>
           <div className="bulk-modal-header-actions">
@@ -1766,6 +1775,7 @@ export default function App() {
                     </td>
                     <td>
                       <select
+                        tabIndex={-1}
                         value={row.minLevel}
                         onChange={(event) =>
                           onBulkFieldChange(row.rowId, 'minLevel', () =>
@@ -1784,6 +1794,7 @@ export default function App() {
                     </td>
                     <td>
                       <select
+                        tabIndex={-1}
                         value={row.maxLevel}
                         onChange={(event) =>
                           onBulkFieldChange(row.rowId, 'maxLevel', () =>
@@ -1802,6 +1813,7 @@ export default function App() {
                     </td>
                     <td>
                       <input
+                        tabIndex={-1}
                         value={row.phone}
                         onChange={(event) =>
                           onBulkFieldChange(row.rowId, 'phone', () =>
@@ -1818,6 +1830,7 @@ export default function App() {
                     </td>
                     <td>
                       <button
+                        tabIndex={-1}
                         className="ghost-button danger compact-button"
                         type="button"
                         onClick={() => clearBulkRow(row.rowId)}
@@ -2420,12 +2433,13 @@ export default function App() {
       <main className="app-shell public-kiosk">
         <section className="hero hero-slim">
           <div>
-            <span className="eyebrow">Open play</span>
             <h1>OpenQueue</h1>
-            <p>
-              {sessionDate}. Live queue
-              {showPublicRanking ? ' and standings' : ''}. Ask staff for the admin link — this view
-              is read-only.
+            <p className="public-hero-club">Camsur Pickleball Club</p>
+            <p className="public-hero-meta">
+              {sessionDate}
+              {' · '}
+              Live queue
+              {showPublicRanking ? ' and standings' : ''}
             </p>
           </div>
         </section>
@@ -2448,7 +2462,7 @@ export default function App() {
           ) : null}
         </div>
         {publicPage === 'standings' && showPublicRanking ? renderStandingsView() : renderPlayerView()}
-        <footer className="app-footer">{BRAND_FOOTER}</footer>
+        <AppFooter />
       </main>
     );
   }
@@ -2483,7 +2497,7 @@ export default function App() {
             Unlock admin board
           </button>
         </section>
-        <footer className="app-footer">{BRAND_FOOTER}</footer>
+        <AppFooter />
       </main>
     );
   }
@@ -2834,16 +2848,6 @@ export default function App() {
                         ))
                       )}
                     </div>
-                    <div className="compatibility-list">
-                      Can play:{' '}
-                      {group.compatibleCourtIds.length
-                        ? group.compatibleCourtIds
-                            .map((courtId) =>
-                              courts.find((court) => court.id === courtId)?.name,
-                            )
-                            .join(', ')
-                        : '—'}
-                    </div>
                   </article>
                 );
               })}
@@ -3059,7 +3063,7 @@ export default function App() {
           </section>
         </section>
       )}
-      <footer className="app-footer">{BRAND_FOOTER}</footer>
+      <AppFooter />
     </main>
   );
 }
