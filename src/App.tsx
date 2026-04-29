@@ -2512,14 +2512,11 @@ export default function App() {
           deploys.
         </div>
       ) : null}
-      <section className="hero">
+      <section className="hero hero-admin">
         <div>
-          <span className="eyebrow">Admin open play manager</span>
-          <h1>OpenQueue</h1>
-          <p>
-            Session {sessionDate}. Manage the queue, standby groups, and courts — share the player
-            link for live check-in and the public list.
-          </p>
+          <p className="hero-admin-location">CWC, Pili, Camarines Sur</p>
+          <p className="hero-admin-brand">Camsur Pickleball Club | OpenPlay</p>
+          <h1 className="hero-admin-title">Admin OpenQueue Manager</h1>
         </div>
         <div className="hero-stats">
           <div>

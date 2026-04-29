@@ -294,6 +294,39 @@ button {
   line-height: 1.45;
 }
 
+.hero-admin-location {
+  margin: 0;
+  color: rgb(255 255 255 / 0.82);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hero-admin-brand {
+  margin: 0.5rem 0 0;
+  max-width: 56rem;
+  color: rgb(255 255 255 / 0.95);
+  font-size: clamp(1rem, 2.2vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+}
+
+.hero-admin-title {
+  margin: 0.55rem 0 0;
+  font-size: clamp(1.65rem, 4vw, 2.75rem);
+  line-height: 1.05;
+  color: var(--brand-white);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 16px rgb(0 20 50 / 0.25);
+}
+
+.hero-admin .hero-stats {
+  align-self: center;
+}
+
 .public-nav {
   display: flex;
   justify-content: center;
